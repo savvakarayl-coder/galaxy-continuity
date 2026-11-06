@@ -1,0 +1,23 @@
+.DS_Store
+*.swp
+*~
+
+# Swift / macOS
+.build/
+build/
+*.app
+Packages/
+Package.pins
+Package.resolved
+*.xcodeproj
+*.xcworkspace
+
+# Android / Gradle
+.gradle/
+**/build/
+*.apk
+*.aab
+local.properties
+.idea/
+*.iml
+.cxx/
