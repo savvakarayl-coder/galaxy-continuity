@@ -511,15 +511,16 @@ class TestTier2Boundary(unittest.TestCase):
             client.close()
 
     def test_38_camera_corrupted_stream_packet_short_header(self):
-        """Stream packet with < 4 bytes raises ValueError in parser safely."""
+        """Stream packet with < 5 bytes raises ValueError in parser safely (PROTOCOL.md § 4.2)."""
         with self.assertRaises(ValueError):
-            parse_stream_packet(b"\x01\x01")
+            parse_stream_packet(b"\x01\x01\x00")
 
     def test_39_camera_stream_packet_zero_length_payload(self):
         """Stream packet with empty 0-byte payload parses correctly."""
-        packet = make_stream_packet(stream_type=0x02, frame_type=0x01, seq=0, payload=b"")
+        packet = make_stream_packet(stream_type=0x02, payload=b"")
         parsed = parse_stream_packet(packet)
         self.assertEqual(parsed["stream_type"], 0x02)
+        self.assertEqual(parsed["length"], 0)
         self.assertEqual(len(parsed["payload"]), 0)
 
     # =========================================================================

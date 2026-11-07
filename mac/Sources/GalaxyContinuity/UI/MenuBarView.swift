@@ -70,13 +70,26 @@ public struct MenuBarView: View {
                 }
 
                 if !state.lastSharedClipboard.isEmpty {
-                    Text(state.lastSharedClipboard)
-                        .font(.system(size: 11))
-                        .lineLimit(3)
+                    if state.lastSharedClipboardType.hasPrefix("image/") {
+                        HStack {
+                            Image(systemName: "photo")
+                                .foregroundColor(.accentColor)
+                            Text("Image in clipboard (\(state.lastSharedClipboardType))")
+                                .font(.system(size: 11))
+                        }
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.secondary.opacity(0.08))
                         .cornerRadius(8)
+                    } else {
+                        Text(state.lastSharedClipboard)
+                            .font(.system(size: 11))
+                            .lineLimit(3)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.08))
+                            .cornerRadius(8)
+                    }
                 } else {
                     Text("Copy text on Mac or Galaxy to sync instantly")
                         .font(.system(size: 11))

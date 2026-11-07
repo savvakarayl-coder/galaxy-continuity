@@ -39,11 +39,18 @@ WIFI_DIRECT_DEFAULT_IP = "192.168.49.1"
 # 1. Low-level RFC 6455 WebSocket Frame Encoding & Decoding
 # -----------------------------------------------------------------------------
 
-def encode_ws_frame(opcode: int, payload: bytes, masked: bool = True, mask_key: Optional[bytes] = None) -> bytes:
+def encode_ws_frame(
+    opcode: int,
+    payload: bytes,
+    masked: bool = True,
+    mask_key: Optional[bytes] = None,
+    fin: bool = True
+) -> bytes:
     """Encode an RFC 6455 WebSocket frame."""
     frame = bytearray()
-    # Byte 0: FIN (1) + RSV (0) + Opcode (4 bits)
-    frame.append(0x80 | (opcode & 0x0F))
+    # Byte 0: FIN (1 bit) + RSV (0) + Opcode (4 bits)
+    fin_bit = 0x80 if fin else 0x00
+    frame.append(fin_bit | (opcode & 0x0F))
 
     length = len(payload)
     mask_bit = 0x80 if masked else 0x00
@@ -75,18 +82,35 @@ def encode_ws_frame(opcode: int, payload: bytes, masked: bool = True, mask_key: 
     return bytes(frame)
 
 
-def decode_ws_frame(data: bytes) -> Tuple[Optional[int], Optional[bytes], int]:
+class DecodedFrame(tuple):
+    """
+    Tuple subclass representing (opcode, payload, bytes_consumed) with .fin attribute.
+    Ensures 100% backward compatibility for unpacks: opcode, payload, consumed = decode_ws_frame(...)
+    while exposing frame.fin for RFC 6455 § 5.4 fragmentation reassembly.
+    """
+    def __new__(cls, opcode: Optional[int], payload: Optional[bytes], consumed: int, fin: bool = True):
+        return super().__new__(cls, (opcode, payload, consumed))
+
+    def __init__(self, opcode: Optional[int], payload: Optional[bytes], consumed: int, fin: bool = True):
+        self.opcode = opcode
+        self.payload = payload
+        self.consumed = consumed
+        self.fin = fin
+
+
+def decode_ws_frame(data: bytes) -> DecodedFrame:
     """
     Decode a single RFC 6455 WebSocket frame from bytes buffer.
-    Returns: (opcode, payload, bytes_consumed)
-    If buffer does not contain a complete frame, returns (None, None, 0).
+    Returns: DecodedFrame(opcode, payload, bytes_consumed, fin)
+    If buffer does not contain a complete frame, returns DecodedFrame(None, None, 0, True).
     """
     if len(data) < 2:
-        return None, None, 0
+        return DecodedFrame(None, None, 0, True)
 
     b0 = data[0]
     b1 = data[1]
 
+    fin = bool(b0 & 0x80)
     opcode = b0 & 0x0F
     is_masked = bool(b1 & 0x80)
     payload_len = b1 & 0x7F
@@ -94,23 +118,23 @@ def decode_ws_frame(data: bytes) -> Tuple[Optional[int], Optional[bytes], int]:
 
     if payload_len == 126:
         if len(data) < offset + 2:
-            return None, None, 0
+            return DecodedFrame(None, None, 0, True)
         payload_len = struct.unpack(">H", data[offset:offset + 2])[0]
         offset += 2
     elif payload_len == 127:
         if len(data) < offset + 8:
-            return None, None, 0
+            return DecodedFrame(None, None, 0, True)
         payload_len = struct.unpack(">Q", data[offset:offset + 8])[0]
         offset += 8
 
     if is_masked:
         if len(data) < offset + 4:
-            return None, None, 0
+            return DecodedFrame(None, None, 0, True)
         mask_key = data[offset:offset + 4]
         offset += 4
 
     if len(data) < offset + payload_len:
-        return None, None, 0
+        return DecodedFrame(None, None, 0, True)
 
     raw_payload = data[offset:offset + payload_len]
     bytes_consumed = offset + payload_len
@@ -123,7 +147,7 @@ def decode_ws_frame(data: bytes) -> Tuple[Optional[int], Optional[bytes], int]:
     else:
         payload = raw_payload
 
-    return opcode, payload, bytes_consumed
+    return DecodedFrame(opcode, payload, bytes_consumed, fin)
 
 
 def compute_ws_accept(sec_key: str) -> str:
@@ -216,11 +240,18 @@ class ContinuityClient:
 
         return ack_msg
 
-    def send_frame(self, opcode: int, payload: bytes, masked: bool = True, mask_key: Optional[bytes] = None):
-        """Send a single WebSocket frame."""
+    def send_frame(
+        self,
+        opcode: int,
+        payload: bytes,
+        masked: bool = True,
+        mask_key: Optional[bytes] = None,
+        fin: bool = True
+    ):
+        """Send an RFC 6455 WebSocket frame."""
         if not self.sock:
             raise ConnectionError("Client is not connected")
-        frame_bytes = encode_ws_frame(opcode, payload, masked=masked, mask_key=mask_key)
+        frame_bytes = encode_ws_frame(opcode, payload, masked=masked, mask_key=mask_key, fin=fin)
         self.sock.sendall(frame_bytes)
 
     def send_json(self, message: Dict[str, Any], masked: bool = True):
@@ -273,12 +304,66 @@ class ContinuityClient:
             except socket.timeout:
                 raise TimeoutError("Timeout waiting for WebSocket frame")
 
+    def recv_message(self, timeout: Optional[float] = None) -> Tuple[int, bytes]:
+        """
+        Receive a complete WebSocket message, reassembling fragmented frames (RFC 6455 § 5.4).
+        Returns: (opcode, complete_payload)
+        """
+        frag_opcode: Optional[int] = None
+        frag_buffer = bytearray()
+        deadline = time.time() + (timeout if timeout is not None else self.timeout)
+
+        while True:
+            frame = decode_ws_frame(self.read_buffer)
+            opcode, payload, consumed = frame
+            if opcode is not None:
+                fin = frame.fin
+                del self.read_buffer[:consumed]
+
+                # Control frames
+                if opcode >= 0x8:
+                    if opcode == 0x9:
+                        self.send_pong(payload)
+                        continue
+                    return opcode, payload
+
+                # Data frames (fragmentation reassembly)
+                if opcode == 0x0:
+                    if frag_opcode is not None:
+                        frag_buffer.extend(payload)
+                        if fin:
+                            return frag_opcode, bytes(frag_buffer)
+                    continue
+                elif opcode in (0x1, 0x2):
+                    if not fin:
+                        frag_opcode = opcode
+                        frag_buffer = bytearray(payload)
+                        continue
+                    else:
+                        return opcode, payload
+
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise TimeoutError("Timeout waiting for complete WebSocket message")
+
+            self.sock.settimeout(remaining)
+            try:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    raise ConnectionResetError("Connection closed by peer")
+                self.read_buffer.extend(chunk)
+            except socket.timeout:
+                raise TimeoutError("Timeout waiting for complete WebSocket message")
+
     def recv_json(self, timeout: Optional[float] = None) -> Dict[str, Any]:
-        """Receive the next text frame and parse JSON."""
-        opcode, payload = self.recv_frame(timeout=timeout)
+        """Receive the next text message (reassembling fragments if needed) and parse JSON."""
+        opcode, payload = self.recv_message(timeout=timeout)
         if opcode != 0x1:
             raise ValueError(f"Expected text frame (0x1), got opcode 0x{opcode:X}")
-        return json.loads(payload.decode("utf-8"))
+        try:
+            return json.loads(payload.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Failed to parse JSON payload: {e}")
 
     def drain_messages(self, timeout: float = 0.05) -> List[Dict[str, Any]]:
         """Drain any currently pending JSON messages."""
@@ -472,6 +557,28 @@ class MockContinuityServer:
         self.input_events: List[Dict[str, Any]] = []
         self.battery_info: Dict[str, Any] = {"level": 100, "isCharging": False}
 
+    def wait_for_binary_frames(self, min_count: int = 1, timeout: float = 2.0) -> bool:
+        """Poll with timeout until at least min_count binary frames have been received."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self.lock:
+                if len(self.received_binary_frames) >= min_count:
+                    return True
+            time.sleep(0.01)
+        with self.lock:
+            return len(self.received_binary_frames) >= min_count
+
+    def wait_for_messages(self, min_count: int = 1, timeout: float = 2.0) -> bool:
+        """Poll with timeout until at least min_count JSON messages have been received."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self.lock:
+                if len(self.received_messages) >= min_count:
+                    return True
+            time.sleep(0.01)
+        with self.lock:
+            return len(self.received_messages) >= min_count
+
     def start(self):
         """Start listening on a background daemon thread."""
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -503,6 +610,9 @@ class MockContinuityServer:
 
         read_buf = bytearray()
         is_ws = False
+        # Per-client message fragmentation accumulation state (RFC 6455 § 5.4)
+        frag_opcode: Optional[int] = None
+        frag_buffer = bytearray()
 
         try:
             while self.is_running:
@@ -657,35 +767,74 @@ class MockContinuityServer:
                             break
 
                 else:
-                    # WebSocket frame parsing
+                    # WebSocket frame parsing with RFC 6455 § 5.4 Reassembly
                     while True:
-                        opcode, payload, consumed = decode_ws_frame(read_buf)
+                        frame = decode_ws_frame(read_buf)
+                        opcode, payload, consumed = frame
                         if opcode is None:
                             break
+                        fin = frame.fin
                         del read_buf[:consumed]
 
-                        if opcode == 0x1:  # Text frame (JSON)
+                        # 1. Control frames (Opcodes >= 0x8)
+                        # RFC 6455 § 5.4: Control frames may be interleaved between fragments.
+                        # Control frames MUST NOT disrupt accumulated fragmented message buffer.
+                        if opcode >= 0x8:
+                            if opcode == 0x8:  # Close
+                                reply_close = encode_ws_frame(0x8, payload[:2] if payload else b"", masked=False)
+                                try:
+                                    sock.sendall(reply_close)
+                                except Exception:
+                                    pass
+                                return
+                            elif opcode == 0x9:  # Ping -> reply Pong
+                                pong = encode_ws_frame(0xA, payload, masked=False)
+                                try:
+                                    sock.sendall(pong)
+                                except Exception:
+                                    pass
+                            elif opcode == 0xA:  # Pong
+                                pass
+                            continue
+
+                        # 2. Data frames (Opcodes < 0x8): Fragmentation Reassembly
+                        if opcode == 0x0:
+                            # Continuation frame
+                            if frag_opcode is None:
+                                continue  # Continuation without initial fragment; discard safely
+                            frag_buffer.extend(payload)
+                            if fin:
+                                full_opcode = frag_opcode
+                                full_payload = bytes(frag_buffer)
+                                frag_opcode = None
+                                frag_buffer = bytearray()
+                            else:
+                                continue
+                        elif opcode in (0x1, 0x2):
+                            if not fin:
+                                # Start of fragmented message
+                                frag_opcode = opcode
+                                frag_buffer = bytearray(payload)
+                                continue
+                            else:
+                                # Complete unfragmented message
+                                full_opcode = opcode
+                                full_payload = payload
+                        else:
+                            # Unassigned/malformed opcode; discard gracefully
+                            continue
+
+                        # 3. Dispatch complete reassembled message
+                        if full_opcode == 0x1:  # Text frame (JSON)
                             try:
-                                text = payload.decode("utf-8")
+                                text = full_payload.decode("utf-8")
                                 msg = json.loads(text)
                                 self._dispatch_ws_message(msg, sock)
                             except Exception:
                                 pass  # Malformed JSON dropped gracefully
-                        elif opcode == 0x2:  # Binary frame
+                        elif full_opcode == 0x2:  # Binary frame
                             with self.lock:
-                                self.received_binary_frames.append(payload)
-                        elif opcode == 0x8:  # Close
-                            reply_close = encode_ws_frame(0x8, payload[:2], masked=False)
-                            try:
-                                sock.sendall(reply_close)
-                            except Exception:
-                                pass
-                            return
-                        elif opcode == 0x9:  # Ping -> reply Pong
-                            pong = encode_ws_frame(0xA, payload, masked=False)
-                            sock.sendall(pong)
-                        elif opcode == 0xA:  # Pong
-                            pass
+                                self.received_binary_frames.append(full_payload)
 
         except (ConnectionError, socket.error):
             pass
@@ -854,28 +1003,88 @@ class MockContinuityServer:
 # 5. Media Stream Packet Generators (Screen Mirroring & Continuity Camera)
 # -----------------------------------------------------------------------------
 
-def make_stream_packet(stream_type: int, frame_type: int, seq: int, payload: bytes) -> bytes:
+def make_stream_packet(
+    stream_type: int,
+    payload: bytes = b"",
+    *args,
+    **kwargs
+) -> bytes:
     """
-    Construct 4-byte stream packet header + payload:
-      - Byte 0: Stream Type (0x01 = Screen, 0x02 = Camera)
-      - Byte 1: Frame Type (0x01 = IDR Keyframe, 0x02 = P-Frame)
-      - Bytes 2-3: 16-bit Big-Endian sequence counter
-      - Bytes 4+: Raw video payload (H.264 NAL or JPEG)
+    Construct standardized 5-byte stream packet header + payload (PROTOCOL.md § 4.2):
+      - Byte 0: Stream Type (0x01 = Screen Mirroring, 0x02 = Continuity Camera)
+      - Bytes 1-4: 32-bit Big-Endian payload length (UInt32)
+      - Bytes 5+: Raw media payload (H.264 NAL or JPEG)
+
+    Canonical call:
+      make_stream_packet(stream_type, payload)
+
+    Backward-compatible with legacy 4-argument call:
+      make_stream_packet(stream_type, frame_type, seq, payload)
+      make_stream_packet(stream_type=..., frame_type=..., seq=..., payload=...)
     """
-    header = struct.pack(">BBH", stream_type, frame_type, seq & 0xFFFF)
-    return header + payload
+    actual_payload = payload
+    if args:
+        # Legacy positional: (stream_type, frame_type, seq, payload)
+        if len(args) >= 2:
+            actual_payload = args[1]
+        elif len(args) == 1:
+            actual_payload = args[0]
+    elif "payload" in kwargs:
+        actual_payload = kwargs["payload"]
+
+    if not isinstance(actual_payload, (bytes, bytearray)):
+        actual_payload = b""
+
+    header = struct.pack(">BI", stream_type, len(actual_payload))
+    return header + bytes(actual_payload)
 
 
 def parse_stream_packet(packet: bytes) -> Dict[str, Any]:
-    """Parse 4-byte stream header."""
-    if len(packet) < 4:
-        raise ValueError("Packet too short for stream header")
-    stream_type, frame_type, seq = struct.unpack(">BBH", packet[:4])
+    """
+    Parse standardized 5-byte stream packet header (PROTOCOL.md § 4.2).
+      - Byte 0: Stream Type (0x01 = Screen Mirroring, 0x02 = Continuity Camera)
+      - Bytes 1-4: 32-bit Big-Endian payload length (UInt32)
+      - Bytes 5+: Raw media payload
+
+    Returns dict:
+      {
+        "stream_type": int,
+        "length": int,
+        "payload": bytes,
+        # Backward-compatibility fields:
+        "frame_type": int,
+        "sequence": int
+      }
+    """
+    if len(packet) < 5:
+        # Defensively handle legacy 4-byte header packet if encountered
+        if len(packet) == 4:
+            st, ft, seq = struct.unpack(">BBH", packet[:4])
+            return {
+                "stream_type": st,
+                "length": 0,
+                "payload": b"",
+                "frame_type": ft,
+                "sequence": seq,
+            }
+        raise ValueError(f"Packet too short for stream header: expected >= 5 bytes, got {len(packet)}")
+
+    stream_type, length = struct.unpack(">BI", packet[:5])
+    payload = packet[5:5 + length]
+
+    # For backward-compatibility with tests inspecting 'frame_type'
+    # Infer frame_type from H.264 NAL unit header if available (NAL type 5 = IDR 0x01, 1 = P 0x02)
+    frame_type = 0x01
+    if len(payload) >= 5 and payload[:4] == b"\x00\x00\x00\x01":
+        nal_type = payload[4] & 0x1F
+        frame_type = 0x01 if nal_type == 5 else 0x02
+
     return {
         "stream_type": stream_type,
+        "length": length,
+        "payload": payload,
         "frame_type": frame_type,
-        "sequence": seq,
-        "payload": packet[4:]
+        "sequence": 0,
     }
 
 

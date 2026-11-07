@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "GalaxyContinuity",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     products: [
         .library(
@@ -35,7 +35,17 @@ let package = Package(
             dependencies: [
                 "GalaxyContinuityKit"
             ],
-            path: "Tests/GalaxyContinuityTests"
+            path: "Tests/GalaxyContinuityTests",
+            swiftSettings: [
+                .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"])
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                    "-Xlinker", "-rpath", "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                    "-Xlinker", "-rpath", "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/usr/lib"
+                ])
+            ]
         )
     ]
 )

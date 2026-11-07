@@ -50,6 +50,12 @@ class TestTier1Features(unittest.TestCase):
         self.host = self.harness.host
         self.port = self.harness.port
         self.server = self.harness.server
+        with self.server.lock:
+            self.server.last_clipboard_text = None
+            self.server.received_messages.clear()
+            self.server.received_binary_frames.clear()
+            self.server.input_events.clear()
+            self.server.notifications_received.clear()
 
     # =========================================================================
     # Feature 1: Handshake & Protocol Framing
@@ -514,20 +520,19 @@ class TestTier1Features(unittest.TestCase):
             client.close()
 
     def test_29_screen_mirroring_video_binary_frame_transport(self):
-        """Binary frame packet with Stream Type 0x01 (Screen) transfers over WebSocket."""
+        """Binary frame packet with Stream Type 0x01 (Screen) transfers over WebSocket (PROTOCOL.md § 4.2)."""
         client = ContinuityClient(host=self.host, port=self.port)
         client.connect()
         try:
             nal_payload = make_mock_h264_nal(nal_type=5, size=256)
-            packet = make_stream_packet(stream_type=0x01, frame_type=0x01, seq=42, payload=nal_payload)
+            packet = make_stream_packet(stream_type=0x01, payload=nal_payload)
             client.send_binary(packet)
-            time.sleep(0.05)
+            self.assertTrue(self.server.wait_for_binary_frames(min_count=1, timeout=2.0))
             with self.server.lock:
-                self.assertTrue(len(self.server.received_binary_frames) > 0)
                 parsed = parse_stream_packet(self.server.received_binary_frames[-1])
                 self.assertEqual(parsed["stream_type"], 0x01)
-                self.assertEqual(parsed["frame_type"], 0x01)
-                self.assertEqual(parsed["sequence"], 42)
+                self.assertEqual(parsed["length"], len(nal_payload))
+                self.assertEqual(parsed["payload"], nal_payload)
         finally:
             client.close()
 
@@ -616,32 +621,37 @@ class TestTier1Features(unittest.TestCase):
             client.close()
 
     def test_35_continuity_camera_video_binary_stream(self):
-        """Camera binary frame with Stream Type 0x02 and JPEG payload is transferred."""
+        """Camera binary frame with Stream Type 0x02 and JPEG payload is transferred (PROTOCOL.md § 4.2)."""
         client = ContinuityClient(host=self.host, port=self.port)
         client.connect()
         try:
             jpeg = make_mock_jpeg(320, 240)
-            packet = make_stream_packet(stream_type=0x02, frame_type=0x01, seq=101, payload=jpeg)
+            packet = make_stream_packet(stream_type=0x02, payload=jpeg)
             client.send_binary(packet)
-            time.sleep(0.05)
+            self.assertTrue(self.server.wait_for_binary_frames(min_count=1, timeout=2.0))
             with self.server.lock:
                 parsed = parse_stream_packet(self.server.received_binary_frames[-1])
                 self.assertEqual(parsed["stream_type"], 0x02)
-                self.assertEqual(parsed["sequence"], 101)
+                self.assertEqual(parsed["length"], len(jpeg))
                 self.assertTrue(parsed["payload"].startswith(b"\xFF\xD8"))
         finally:
             client.close()
 
-    def test_36_continuity_camera_idr_vs_p_frame_header(self):
-        """Validates stream header distinguishing IDR keyframe (0x01) and P-frame (0x02)."""
-        idr = make_stream_packet(stream_type=0x02, frame_type=0x01, seq=1, payload=b"idr")
-        p_frame = make_stream_packet(stream_type=0x02, frame_type=0x02, seq=2, payload=b"p_frame")
+    def test_36_continuity_camera_stream_packet_framing_and_types(self):
+        """Validates 5-byte stream header distinguishes screen mirroring (0x01) and camera (0x02) per PROTOCOL.md § 4.2."""
+        screen_pkt = make_stream_packet(stream_type=0x01, payload=b"screen_nal_data")
+        camera_pkt = make_stream_packet(stream_type=0x02, payload=b"camera_jpeg_data")
 
-        parsed_idr = parse_stream_packet(idr)
-        parsed_p = parse_stream_packet(p_frame)
+        parsed_screen = parse_stream_packet(screen_pkt)
+        parsed_cam = parse_stream_packet(camera_pkt)
 
-        self.assertEqual(parsed_idr["frame_type"], 0x01)
-        self.assertEqual(parsed_p["frame_type"], 0x02)
+        self.assertEqual(parsed_screen["stream_type"], 0x01)
+        self.assertEqual(parsed_screen["length"], len(b"screen_nal_data"))
+        self.assertEqual(parsed_screen["payload"], b"screen_nal_data")
+
+        self.assertEqual(parsed_cam["stream_type"], 0x02)
+        self.assertEqual(parsed_cam["length"], len(b"camera_jpeg_data"))
+        self.assertEqual(parsed_cam["payload"], b"camera_jpeg_data")
 
     # =========================================================================
     # Feature 8: Notification Sync & Interactive Reply

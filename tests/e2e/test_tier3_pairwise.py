@@ -133,7 +133,7 @@ class TestTier3Pairwise(unittest.TestCase):
 
             # 2. Stream video frame
             nal = make_mock_h264_nal(5, 512)
-            packet = make_stream_packet(stream_type=0x01, frame_type=0x01, seq=1, payload=nal)
+            packet = make_stream_packet(stream_type=0x01, payload=nal)
             client.send_binary(packet)
 
             # 3. Notification arrives from phone
@@ -157,9 +157,15 @@ class TestTier3Pairwise(unittest.TestCase):
             reply_msg = client.expect_message("notification_reply", timeout=2.0)
             self.assertEqual(reply_msg.get("replyText"), "Yes, screen mirroring is active right now!")
 
+            # Deterministic polling: wait for server background thread to receive binary frame
+            self.assertTrue(
+                self.server.wait_for_binary_frames(min_count=1, timeout=2.0),
+                "Server must receive binary stream frame before timeout"
+            )
+
             with self.server.lock:
                 self.assertTrue(self.server.screen_mirroring_active)
-                self.assertTrue(len(self.server.received_binary_frames) > 0)
+                self.assertGreater(len(self.server.received_binary_frames), 0)
         finally:
             client.close()
 
@@ -173,10 +179,13 @@ class TestTier3Pairwise(unittest.TestCase):
             # 2. Send camera frames
             for seq in range(3):
                 jpeg = make_mock_jpeg(160, 120)
-                client.send_binary(make_stream_packet(0x02, 0x01, seq, jpeg))
+                client.send_binary(make_stream_packet(0x02, jpeg))
 
             # 3. Phone user copies clipboard
             client.send_json({"type": "clipboard", "content": "Camera call note", "contentType": "text/plain", "source": "phone"})
+
+            # Deterministic wait for frames
+            self.assertTrue(self.server.wait_for_binary_frames(min_count=3, timeout=2.0))
             time.sleep(0.05)
 
             with self.server.lock:

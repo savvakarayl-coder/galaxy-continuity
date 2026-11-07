@@ -111,7 +111,7 @@ public struct QuickDropView: View {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let fileUrl = url else { return }
                 DispatchQueue.main.async {
-                    ServerManager.shared.shareFileToGalaxy(fileURL: fileUrl)
+                    QuickDropService.shared.sendFile(at: fileUrl)
                 }
             }
         }

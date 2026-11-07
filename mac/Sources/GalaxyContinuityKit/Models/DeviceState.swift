@@ -36,6 +36,7 @@ public final class DeviceState: ObservableObject {
 
     @Published public var clipboardAutoSync: Bool = true
     @Published public var lastSharedClipboard: String = ""
+    @Published public var lastSharedClipboardType: String = "text/plain"
     @Published public var clipboardLastUpdated: Date? = nil
 
     @Published public var transferredFiles: [FileTransferItem] = []

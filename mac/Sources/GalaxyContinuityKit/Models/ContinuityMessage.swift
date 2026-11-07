@@ -41,7 +41,7 @@ public struct ContinuityMessage: Codable, Equatable {
     public var packageName: String?
     public var bytesTransferred: Int64?
     public var totalBytes: Int64?
-    public var percentage: Int?
+    public var percentage: Double?
     public var status: String?
     public var width: Int?
     public var height: Int?
@@ -51,7 +51,7 @@ public struct ContinuityMessage: Codable, Equatable {
     public var action: String?
     public var x: Double?
     public var y: Double?
-    public var button: String?
+    public var button: Int?
     public var key: String?
     public var keyCode: Int?
     public var lens: String?
@@ -88,7 +88,7 @@ public struct ContinuityMessage: Codable, Equatable {
         packageName: String? = nil,
         bytesTransferred: Int64? = nil,
         totalBytes: Int64? = nil,
-        percentage: Int? = nil,
+        percentage: Double? = nil,
         status: String? = nil,
         width: Int? = nil,
         height: Int? = nil,
@@ -98,7 +98,7 @@ public struct ContinuityMessage: Codable, Equatable {
         action: String? = nil,
         x: Double? = nil,
         y: Double? = nil,
-        button: String? = nil,
+        button: Int? = nil,
         key: String? = nil,
         keyCode: Int? = nil,
         lens: String? = nil,

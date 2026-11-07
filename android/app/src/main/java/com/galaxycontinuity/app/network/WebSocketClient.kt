@@ -17,8 +17,10 @@ class WebSocketClient(
     interface ContinuityListener {
         fun onConnected(macName: String)
         fun onDisconnected()
-        fun onClipboardReceived(text: String)
+        fun onClipboardReceived(content: String, contentType: String = "text/plain", hash: String? = null)
         fun onFileAvailable(fileId: String, filename: String, size: Long)
+        fun onFileProgress(fileId: String, bytesTransferred: Long, totalBytes: Long, percentage: Double, status: String)
+        fun onFileComplete(fileId: String, status: String, message: String)
         fun onPingReceived(message: String)
     }
 
@@ -28,9 +30,10 @@ class WebSocketClient(
         .build()
 
     private var webSocket: WebSocket? = null
-    private var isConnected = false
-    private var currentHost = ""
-    private var currentPort = 8765
+    var isConnected = false
+        private set
+    var currentHost = ""
+    var currentPort = 8765
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun connect(host: String, port: Int = 8765) {
@@ -58,16 +61,30 @@ class WebSocketClient(
                             mainHandler.post { listener.onConnected(macName) }
                         }
                         "clipboard" -> {
-                            val content = json.optString("content")
-                            if (content.isNotEmpty()) {
-                                mainHandler.post { listener.onClipboardReceived(content) }
-                            }
+                            val content = if (json.has("content")) json.getString("content") else json.optString("payload", "")
+                            val contentType = json.optString("contentType", "text/plain").ifEmpty { "text/plain" }
+                            val hash = json.optString("hash").ifEmpty { null }
+                            mainHandler.post { listener.onClipboardReceived(content, contentType, hash) }
                         }
                         "file_available" -> {
                             val fileId = json.optString("fileId")
                             val filename = json.optString("filename")
                             val size = json.optLong("fileSize")
                             mainHandler.post { listener.onFileAvailable(fileId, filename, size) }
+                        }
+                        "file_progress" -> {
+                            val fileId = json.optString("fileId")
+                            val transferred = json.optLong("bytesTransferred")
+                            val total = json.optLong("totalBytes")
+                            val pct = json.optDouble("percentage")
+                            val status = json.optString("status")
+                            mainHandler.post { listener.onFileProgress(fileId, transferred, total, pct, status) }
+                        }
+                        "file_complete" -> {
+                            val fileId = json.optString("fileId")
+                            val status = json.optString("status")
+                            val message = json.optString("message")
+                            mainHandler.post { listener.onFileComplete(fileId, status, message) }
                         }
                         "ping_device" -> {
                             val msg = json.optString("message", "Ping from Mac")
@@ -110,13 +127,41 @@ class WebSocketClient(
         webSocket?.send(json.toString())
     }
 
-    fun sendClipboard(text: String) {
+    fun sendClipboard(content: String, contentType: String = "text/plain", hash: String? = null) {
         if (!isConnected) return
         val json = JSONObject().apply {
             put("type", "clipboard")
-            put("content", text)
-            put("contentType", "text/plain")
+            put("content", content)
+            put("payload", content)
+            put("contentType", contentType)
             put("source", "phone")
+            if (hash != null) {
+                put("hash", hash)
+            }
+        }
+        webSocket?.send(json.toString())
+    }
+
+    fun sendFileProgress(fileId: String, bytesTransferred: Long, totalBytes: Long, percentage: Double, status: String) {
+        if (!isConnected) return
+        val json = JSONObject().apply {
+            put("type", "file_progress")
+            put("fileId", fileId)
+            put("bytesTransferred", bytesTransferred)
+            put("totalBytes", totalBytes)
+            put("percentage", percentage)
+            put("status", status)
+        }
+        webSocket?.send(json.toString())
+    }
+
+    fun sendFileComplete(fileId: String, status: String, message: String) {
+        if (!isConnected) return
+        val json = JSONObject().apply {
+            put("type", "file_complete")
+            put("fileId", fileId)
+            put("status", status)
+            put("message", message)
         }
         webSocket?.send(json.toString())
     }

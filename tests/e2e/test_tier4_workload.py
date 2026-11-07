@@ -170,7 +170,7 @@ class TestTier4Workload(unittest.TestCase):
             def stream_video():
                 for seq in range(10):
                     nal = make_mock_h264_nal(5 if seq == 0 else 1, size=256)
-                    pkt = make_stream_packet(stream_type=0x01, frame_type=0x01 if seq == 0 else 0x02, seq=seq, payload=nal)
+                    pkt = make_stream_packet(stream_type=0x01, payload=nal)
                     client.send_binary(pkt)
                     time.sleep(0.01)
 
@@ -229,7 +229,7 @@ class TestTier4Workload(unittest.TestCase):
             # 2. Stream 5 camera frames
             for seq in range(5):
                 jpeg = make_mock_jpeg(320, 240)
-                client.send_binary(make_stream_packet(stream_type=0x02, frame_type=0x01, seq=seq, payload=jpeg))
+                client.send_binary(make_stream_packet(stream_type=0x02, payload=jpeg))
                 time.sleep(0.01)
 
             # 3. User switches to front camera for face view
@@ -242,7 +242,7 @@ class TestTier4Workload(unittest.TestCase):
             # 4. Stream 5 more camera frames with front camera
             for seq in range(5, 10):
                 jpeg = make_mock_jpeg(320, 240)
-                client.send_binary(make_stream_packet(stream_type=0x02, frame_type=0x01, seq=seq, payload=jpeg))
+                client.send_binary(make_stream_packet(stream_type=0x02, payload=jpeg))
                 time.sleep(0.01)
 
             # 5. Participant shares meeting link via clipboard

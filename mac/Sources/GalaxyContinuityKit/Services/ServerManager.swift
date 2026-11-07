@@ -2,6 +2,7 @@ import AppKit
 import CryptoKit
 import Darwin
 import Foundation
+import UniformTypeIdentifiers
 
 final class ConnectedClient {
     let id: UUID
@@ -12,14 +13,24 @@ final class ConnectedClient {
     var deviceName: String = "Samsung Galaxy"
     var platform: String = "Unknown"
 
+    // RFC 6455 § 5.4 Fragmentation Reassembly Buffer
+    var fragmentOpcode: UInt8? = nil
+    var fragmentBuffer = Data()
+
     init(id: UUID = UUID(), fd: Int32) {
         self.id = id
         self.fd = fd
     }
 
+    func resetFragmentationState() {
+        fragmentOpcode = nil
+        fragmentBuffer.removeAll(keepingCapacity: false)
+    }
+
     func close() {
         readSource?.cancel()
         Darwin.close(fd)
+        resetFragmentationState()
     }
 }
 
@@ -254,12 +265,9 @@ public final class ServerManager {
                 let fileData = client.readBuffer.subdata(in: bodyStartIndex..<(bodyStartIndex + contentLength))
                 client.readBuffer.removeSubrange(0..<(bodyStartIndex + contentLength))
 
-                var rawFilename = headers["x-filename"] ?? "Received_File_\(Int(Date().timeIntervalSince1970)).bin"
-                if let decoded = rawFilename.removingPercentEncoding {
-                    rawFilename = decoded
-                }
-
-                saveUploadedFile(name: rawFilename, data: fileData, sender: client.deviceName)
+                let rawFilename = headers["x-filename"]
+                let safeFilename = ServerManager.sanitizeUploadFilename(rawFilename)
+                saveUploadedFile(name: safeFilename, data: fileData, sender: client.deviceName)
 
                 let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: keep-alive\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}"
                 sendRaw(client: client, data: Data(response.utf8))
@@ -281,12 +289,42 @@ public final class ServerManager {
         if method == "GET" && path.starts(with: "/api/download/") {
             client.readBuffer.removeAll()
             let fileId = String(path.dropFirst("/api/download/".count))
-            if let fileInfo = sharedFiles[fileId], let fileData = try? Data(contentsOf: fileInfo.url) {
+
+            if let fileInfo = sharedFiles[fileId],
+               FileManager.default.fileExists(atPath: fileInfo.url.path),
+               let fileHandle = try? FileHandle(forReadingFrom: fileInfo.url) {
+
+                let fileSize = (try? fileInfo.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 let encodedName = fileInfo.filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? fileInfo.filename
-                let headers = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"\(encodedName)\"\r\nContent-Length: \(fileData.count)\r\n\r\n"
-                sendRaw(client: client, data: Data(headers.utf8) + fileData)
+                let mimeType = UTType(filenameExtension: fileInfo.url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+
+                let headerStr = "HTTP/1.1 200 OK\r\nContent-Type: \(mimeType)\r\nContent-Disposition: attachment; filename=\"\(encodedName)\"\r\nContent-Length: \(fileSize)\r\nConnection: close\r\n\r\n"
+                sendRaw(client: client, data: Data(headerStr.utf8))
+
+                // Stream chunks (64 KB)
+                let chunkSize = 65536
+                var bytesSent: Int64 = 0
+                while bytesSent < Int64(fileSize) {
+                    let chunkData = fileHandle.readData(ofLength: chunkSize)
+                    if chunkData.isEmpty { break }
+                    sendRaw(client: client, data: chunkData)
+                    bytesSent += Int64(chunkData.count)
+
+                    let pct = fileSize > 0 ? (Double(bytesSent) / Double(fileSize) * 100.0) : 100.0
+                    let progressMsg = ContinuityMessage(
+                        type: "file_progress",
+                        fileId: fileId,
+                        filename: fileInfo.filename,
+                        bytesTransferred: bytesSent,
+                        totalBytes: Int64(fileSize),
+                        percentage: pct,
+                        status: bytesSent >= Int64(fileSize) ? "completed" : "transferring"
+                    )
+                    self.broadcastMessage(progressMsg)
+                }
+                try? fileHandle.close()
             } else {
-                let notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
+                let notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 sendRaw(client: client, data: Data(notFound.utf8))
             }
             removeClient(client)
@@ -300,9 +338,51 @@ public final class ServerManager {
         removeClient(client)
     }
 
+    // MARK: - Filename Sanitization & Path Confinement
+    public static func sanitizeUploadFilename(_ raw: String?) -> String {
+        let fallback = "Received_File_\(Int(Date().timeIntervalSince1970)).bin"
+        guard let raw = raw else { return fallback }
+
+        var name = raw
+        if let decoded = name.removingPercentEncoding {
+            name = decoded
+        }
+        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Check if raw/decoded string is empty or composed solely of dots, slashes, or backslashes
+        // (e.g. "", ".", "..", "...", "/", "\\") before URL(fileURLWithPath:) resolves it to CWD
+        if name.isEmpty || name.allSatisfy({ $0 == "." || $0 == "/" || $0 == "\\" }) {
+            return fallback
+        }
+
+        // Extract terminal path component to discard all directory traversal prefixes
+        var candidate = URL(fileURLWithPath: name).lastPathComponent
+
+        // Strip any Windows-style backslash components
+        if let lastBackslash = candidate.split(separator: "\\").last {
+            candidate = String(lastBackslash)
+        }
+
+        candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Disallow empty, root "/", "."-prefixed (hidden files or . / ..), and path separators
+        if candidate.isEmpty || candidate == "/" || candidate.hasPrefix(".") || candidate.contains("/") || candidate.contains("\\") {
+            return fallback
+        }
+
+        return candidate
+    }
+
     private func saveUploadedFile(name: String, data: Data, sender: String) {
-        let destDir = self.downloadsDirectory
-        var targetUrl = destDir.appendingPathComponent(name)
+        let safeName = ServerManager.sanitizeUploadFilename(name)
+        let destDir = self.downloadsDirectory.standardizedFileURL.resolvingSymlinksInPath()
+        var targetUrl = destDir.appendingPathComponent(safeName).standardizedFileURL.resolvingSymlinksInPath()
+
+        // Enforce strict confinement: targetUrl must resolve immediately within destDir
+        guard targetUrl.deletingLastPathComponent().path == destDir.path else {
+            print("[ServerManager] Security alert: resolved path \(targetUrl.path) is outside downloads directory \(destDir.path)")
+            return
+        }
 
         var counter = 1
         let ext = targetUrl.pathExtension
@@ -310,8 +390,13 @@ public final class ServerManager {
 
         while FileManager.default.fileExists(atPath: targetUrl.path) {
             let newName = ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)"
-            targetUrl = destDir.appendingPathComponent(newName)
+            targetUrl = destDir.appendingPathComponent(newName).standardizedFileURL.resolvingSymlinksInPath()
             counter += 1
+        }
+
+        guard targetUrl.deletingLastPathComponent().path == destDir.path else {
+            print("[ServerManager] Security alert: deduplicated path \(targetUrl.path) is outside downloads directory \(destDir.path)")
+            return
         }
 
         do {
@@ -336,6 +421,16 @@ public final class ServerManager {
                     subtitle: "Saved to ~/Downloads/GalaxyContinuity",
                     body: "\(finalName) (\(item.formattedSize))"
                 )
+
+                // Send file_complete confirmation
+                let completeMsg = ContinuityMessage(
+                    type: "file_complete",
+                    fileId: UUID().uuidString,
+                    filename: finalName,
+                    message: "File saved to ~/Downloads/GalaxyContinuity/\(finalName)",
+                    status: "success"
+                )
+                self.broadcastMessage(completeMsg)
             }
         } catch {
             print("[ServerManager] Failed to write uploaded file: \(error)")
@@ -364,8 +459,9 @@ public final class ServerManager {
                 let clipMsg = ContinuityMessage(
                     type: "clipboard",
                     content: DeviceState.shared.lastSharedClipboard,
-                    contentType: "text/plain",
-                    source: "mac"
+                    contentType: DeviceState.shared.lastSharedClipboardType,
+                    source: "mac",
+                    payload: DeviceState.shared.lastSharedClipboard
                 )
                 self.sendWebSocketMessage(client: client, message: clipMsg)
             }
@@ -374,28 +470,108 @@ public final class ServerManager {
 
     private func processWebSocketData(_ client: ConnectedClient) {
         while let frame = WebSocketFramer.decodeFrame(from: &client.readBuffer) {
-            handleWebSocketFrame(client: client, opcode: frame.opcode, payload: frame.payload)
+            handleWebSocketFrame(client: client, frame: frame)
         }
     }
 
-    private func handleWebSocketFrame(client: ConnectedClient, opcode: UInt8, payload: Data) {
-        switch opcode {
-        case 0x1: // Text frame
-            if let string = String(data: payload, encoding: .utf8),
-               let jsonData = string.data(using: .utf8),
-               let message = try? JSONDecoder().decode(ContinuityMessage.self, from: jsonData) {
-                handleIncomingMessage(client: client, message: message)
+    func handleWebSocketFrame(client: ConnectedClient, frame: WebSocketFrame) {
+        // Control frames (opcode >= 0x8) MUST NOT be fragmented (RFC 6455 § 5.5)
+        // and MAY be interleaved within fragmented data messages (RFC 6455 § 5.4).
+        // Control frames MUST NOT disrupt the current fragment reassembly buffer.
+        if frame.opcode >= 0x8 {
+            switch frame.opcode {
+            case 0x8: // Close
+                sendFrame(client: client, opcode: 0x8, payload: frame.payload.prefix(2))
+                removeClient(client)
+
+            case 0x9: // Ping -> reply with Pong
+                sendFrame(client: client, opcode: 0xA, payload: frame.payload)
+
+            case 0xA: // Pong heartbeat response
+                break
+
+            default:
+                print("[ServerManager] Dropping unassigned control opcode: \(frame.opcode)")
+                break
+            }
+            return
+        }
+
+        // Data frames (opcode < 0x8)
+        let maxMessageSize = 64 * 1024 * 1024 // 64 MB DoS guard
+
+        switch frame.opcode {
+        case 0x0: // Continuation frame
+            guard let initialOpcode = client.fragmentOpcode else {
+                print("[ServerManager] Warning: Received continuation frame (0x0) without active fragmented message; dropping")
+                return
             }
 
-        case 0x8: // Close
-            removeClient(client)
+            if client.fragmentBuffer.count + frame.payload.count > maxMessageSize {
+                print("[ServerManager] Error: Fragmented payload exceeded maximum size limit (\(maxMessageSize) bytes); aborting message")
+                client.resetFragmentationState()
+                return
+            }
 
-        case 0x9: // Ping -> Pong
-            sendFrame(client: client, opcode: 0xA, payload: payload)
+            client.fragmentBuffer.append(frame.payload)
+
+            if frame.fin {
+                let completePayload = client.fragmentBuffer
+                let completeOpcode = initialOpcode
+                client.resetFragmentationState()
+                dispatchCompleteMessage(client: client, opcode: completeOpcode, payload: completePayload)
+            }
+
+        case 0x1, 0x2: // Initial Text (0x1) or Binary (0x2) data frame
+            if client.fragmentOpcode != nil {
+                print("[ServerManager] Warning: Received new data frame (opcode \(frame.opcode)) before previous fragmented message completed; resetting buffer")
+                client.resetFragmentationState()
+            }
+
+            if frame.fin {
+                // Complete unfragmented message
+                dispatchCompleteMessage(client: client, opcode: frame.opcode, payload: frame.payload)
+            } else {
+                // First fragment of fragmented message
+                if frame.payload.count > maxMessageSize {
+                    print("[ServerManager] Error: Initial fragment exceeded maximum size limit (\(maxMessageSize) bytes)")
+                    return
+                }
+                client.fragmentOpcode = frame.opcode
+                client.fragmentBuffer = frame.payload
+            }
+
+        default: // Reserved/unassigned non-control opcodes (0x3 - 0x7)
+            print("[ServerManager] Warning: Dropping frame with unassigned non-control opcode: \(frame.opcode)")
+            break
+        }
+    }
+
+    private func dispatchCompleteMessage(client: ConnectedClient, opcode: UInt8, payload: Data) {
+        switch opcode {
+        case 0x1: // Text frame (UTF-8 JSON)
+            guard let string = String(data: payload, encoding: .utf8),
+                  let jsonData = string.data(using: .utf8) else {
+                print("[ServerManager] Discarding text frame: invalid UTF-8 payload")
+                return
+            }
+
+            if let message = try? JSONDecoder().decode(ContinuityMessage.self, from: jsonData) {
+                handleIncomingMessage(client: client, message: message)
+            } else {
+                print("[ServerManager] Failed to decode ContinuityMessage JSON: \(string.prefix(200))")
+            }
+
+        case 0x2: // Binary frame (e.g. Media stream packet)
+            handleIncomingBinaryFrame(client: client, payload: payload)
 
         default:
             break
         }
+    }
+
+    private func handleIncomingBinaryFrame(client: ConnectedClient, payload: Data) {
+        // Opcode 0x2 binary frame receiver
     }
 
     private func handleIncomingMessage(client: ConnectedClient, message: ContinuityMessage) {
@@ -415,11 +591,24 @@ public final class ServerManager {
             }
 
         case "clipboard":
-            if let content = message.content {
+            if let content = message.content ?? message.payload {
+                let contentType = message.contentType ?? "text/plain"
+                let hash = message.hash
                 Task { @MainActor in
-                    ClipboardSyncService.shared.handleIncomingClipboard(text: content, sender: client.deviceName)
+                    ClipboardSyncService.shared.handleIncomingClipboard(
+                        content: content,
+                        contentType: contentType,
+                        hash: hash,
+                        sender: client.deviceName
+                    )
                 }
             }
+
+        case "file_progress":
+            QuickDropService.shared.handleProgressUpdate(message: message)
+
+        case "file_complete":
+            QuickDropService.shared.handleTransferComplete(message: message)
 
         case "battery_update":
             if let level = message.level {
