@@ -9,10 +9,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.setActivationPolicy(.regular)
         setupMenuBar()
         setupPopover()
         startServices()
+
+        // Bring Screen Mirror window to front
+        ScreenMirroringWindowController.shared.show()
     }
 
     private func setupMenuBar() {

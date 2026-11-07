@@ -85,10 +85,10 @@ class ScreenMirroringService : Service() {
                     resultData = cachedResultData
                 }
 
-                val width = intent.getIntExtra(EXTRA_WIDTH, 1080)
-                val height = intent.getIntExtra(EXTRA_HEIGHT, 2400)
+                val width = intent.getIntExtra(EXTRA_WIDTH, 720)
+                val height = intent.getIntExtra(EXTRA_HEIGHT, 1600)
                 val fps = intent.getIntExtra(EXTRA_FPS, 30).coerceAtLeast(1)
-                val bitrate = intent.getIntExtra(EXTRA_BITRATE, 4000000).coerceAtLeast(500000)
+                val bitrate = intent.getIntExtra(EXTRA_BITRATE, 3000000).coerceAtLeast(500000)
                 val format = intent.getStringExtra(EXTRA_FORMAT) ?: "h264"
 
                 if (resultCode == Activity.RESULT_OK && resultData != null) {
@@ -114,19 +114,14 @@ class ScreenMirroringService : Service() {
         format: String
     ) {
         if (isStreaming) {
-            Log.d(TAG, "Screen mirroring already running; ignoring restart")
-            return
+            Log.d(TAG, "Screen mirroring already running; restarting with new session")
+            stopScreenMirroring("restarting")
         }
 
-        // On Android 14+ (UPSIDE_DOWN_CAKE), startForeground MUST precede getMediaProjection!
+        // Foreground service type MEDIA_PROJECTION is required for MediaProjection on Android 10+ (Q)
         val notification = buildNotification("Screen Mirroring active — streaming display to Mac")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            } else {
-                0
-            }
-            startForeground(NOTIFICATION_ID, notification, type)
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -146,6 +141,8 @@ class ScreenMirroringService : Service() {
             }
         }, Handler(Looper.getMainLooper()))
 
+        isStreaming = true
+
         try {
             if (format.equals("jpeg", ignoreCase = true)) {
                 setupImageReaderAndVirtualDisplay(width, height)
@@ -157,8 +154,8 @@ class ScreenMirroringService : Service() {
                     setupImageReaderAndVirtualDisplay(width, height)
                 }
             }
-            isStreaming = true
         } catch (e: Exception) {
+            isStreaming = false
             Log.e(TAG, "Failed to initialize video encoder or virtual display", e)
             stopScreenMirroring("init_error")
         }
@@ -175,6 +172,8 @@ class ScreenMirroringService : Service() {
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1 second keyframe interval
+            // Ensure hardware encoder periodically produces frames even when phone display is static
+            setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000L)
         }
 
         val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)

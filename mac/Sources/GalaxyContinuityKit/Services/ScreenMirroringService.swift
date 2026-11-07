@@ -39,7 +39,7 @@ public final class ScreenMirroringService: @unchecked Sendable {
         return (streamType, length, payload)
     }
 
-    public func startMirroring(width: Int = 1080, height: Int = 2400, fps: Int = 30, bitrate: Int = 4000000) {
+    public func startMirroring(width: Int = 720, height: Int = 1600, fps: Int = 30, bitrate: Int = 3000000) {
         let msg = ContinuityMessage(
             type: "screen_start",
             width: width,
@@ -64,6 +64,30 @@ public final class ScreenMirroringService: @unchecked Sendable {
         stopStallWatchdog()
     }
 
+    private var adbPath: String? = {
+        let candidates = [
+            "/tmp/platform-tools/adb",
+            "/usr/local/bin/adb",
+            "/opt/homebrew/bin/adb",
+            NSHomeDirectory() + "/Library/Android/sdk/platform-tools/adb"
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }()
+
+    private func dispatchAdbInput(args: [String]) {
+        guard let adb = adbPath else { return }
+        DispatchQueue.global(qos: .userInteractive).async {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: adb)
+            proc.arguments = ["shell", "input"] + args
+            try? proc.run()
+        }
+    }
+
+    private var lastDownX: Double = 0.5
+    private var lastDownY: Double = 0.5
+    private var lastDownTime: Date = Date()
+
     public func sendInputEvent(action: String, x: Double, y: Double, button: Int = 0) {
         let clampedX = max(0.0, min(1.0, x))
         let clampedY = max(0.0, min(1.0, y))
@@ -75,6 +99,24 @@ public final class ScreenMirroringService: @unchecked Sendable {
             button: button
         )
         ServerManager.shared.broadcastMessage(msg)
+
+        if action == "down" {
+            lastDownX = clampedX
+            lastDownY = clampedY
+            lastDownTime = Date()
+        } else if action == "up" {
+            let px = Int(clampedX * 1080.0)
+            let py = Int(clampedY * 2400.0)
+            let startPx = Int(lastDownX * 1080.0)
+            let startPy = Int(lastDownY * 2400.0)
+            let dist = hypot(Double(px - startPx), Double(py - startPy))
+            let duration = max(50, min(600, Int(Date().timeIntervalSince(lastDownTime) * 1000)))
+            if dist > 25 {
+                dispatchAdbInput(args: ["swipe", "\(startPx)", "\(startPy)", "\(px)", "\(py)", "\(duration)"])
+            } else {
+                dispatchAdbInput(args: ["tap", "\(px)", "\(py)"])
+            }
+        }
     }
 
     public func sendKeyInput(key: String, keyCode: Int? = nil) {
@@ -84,6 +126,14 @@ public final class ScreenMirroringService: @unchecked Sendable {
             keyCode: keyCode
         )
         ServerManager.shared.broadcastMessage(msg)
+
+        let keyUpper = key.uppercased()
+        if keyUpper == "BACK" { dispatchAdbInput(args: ["keyevent", "4"]) }
+        else if keyUpper == "HOME" { dispatchAdbInput(args: ["keyevent", "3"]) }
+        else if keyUpper == "RECENTS" { dispatchAdbInput(args: ["keyevent", "187"]) }
+        else if keyUpper == "NOTIFICATIONS" { dispatchAdbInput(args: ["keyevent", "83"]) }
+        else if keyUpper == "POWER" || keyUpper == "LOCK" { dispatchAdbInput(args: ["keyevent", "26"]) }
+        else if let code = keyCode, code > 0 { dispatchAdbInput(args: ["keyevent", "\(code)"]) }
     }
 
     public func handleIncomingFrame(_ frameData: Data) {
@@ -148,8 +198,8 @@ public final class ScreenMirroringService: @unchecked Sendable {
         timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
         timer.setEventHandler { [weak self] in
             guard let self = self, let last = self.lastFrameReceivedDate else { return }
-            if Date().timeIntervalSince(last) > 5.0 {
-                print("[ScreenMirroringService] Stream stalled (>5000ms), issuing screen_stop")
+            if Date().timeIntervalSince(last) > 30.0 {
+                print("[ScreenMirroringService] Stream stalled (>30s), issuing screen_stop")
                 self.stopMirroring(reason: "stream_stalled")
             }
         }

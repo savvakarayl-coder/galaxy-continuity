@@ -22,6 +22,11 @@ class ContinuityAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        try {
+            val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
+            info.feedbackType = android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_GENERIC
+            serviceInfo = info
+        } catch (_: Exception) {}
         instance = this
         Log.d(TAG, "ContinuityAccessibilityService connected")
     }
@@ -83,7 +88,15 @@ class ContinuityAccessibilityService : AccessibilityService() {
                 }
                 val stroke = GestureDescription.StrokeDescription(path, 0, strokeCoords.durationMs)
                 val gesture = GestureDescription.Builder().addStroke(stroke).build()
-                dispatchGesture(gesture, null, null)
+                val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        Log.d(TAG, "Gesture completed: ${strokeCoords.startX},${strokeCoords.startY} -> ${strokeCoords.endX},${strokeCoords.endY} (${strokeCoords.durationMs}ms)")
+                    }
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        Log.w(TAG, "Gesture cancelled: ${strokeCoords.startX},${strokeCoords.startY} -> ${strokeCoords.endX},${strokeCoords.endY}")
+                    }
+                }, null)
+                Log.d(TAG, "dispatchGesture invoked: result=$dispatched")
 
                 // Defensively reset down state
                 downTime = 0L

@@ -59,7 +59,7 @@ public struct ScreenMirroringView: View {
             .cornerRadius(16)
 
             // Hardware Navigation Buttons Bar
-            HStack(spacing: 24) {
+            HStack(spacing: 16) {
                 Button(action: {
                     ScreenMirroringService.shared.sendKeyInput(key: "RECENTS", keyCode: 187)
                 }) {
@@ -86,6 +86,24 @@ public struct ScreenMirroringView: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Back")
+
+                Button(action: {
+                    ScreenMirroringService.shared.sendKeyInput(key: "NOTIFICATIONS", keyCode: 83)
+                }) {
+                    Image(systemName: "bell")
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.bordered)
+                .help("Notifications")
+
+                Button(action: {
+                    ScreenMirroringService.shared.sendKeyInput(key: "POWER", keyCode: 26)
+                }) {
+                    Image(systemName: "lock")
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.bordered)
+                .help("Lock / Power")
 
                 Spacer()
 

@@ -39,10 +39,10 @@ class MainActivity : ComponentActivity() {
                 action = ScreenMirroringService.ACTION_START
                 putExtra(ScreenMirroringService.EXTRA_RESULT_CODE, result.resultCode)
                 putExtra(ScreenMirroringService.EXTRA_RESULT_DATA, result.data)
-                putExtra(ScreenMirroringService.EXTRA_WIDTH, 1080)
-                putExtra(ScreenMirroringService.EXTRA_HEIGHT, 2400)
+                putExtra(ScreenMirroringService.EXTRA_WIDTH, 720)
+                putExtra(ScreenMirroringService.EXTRA_HEIGHT, 1600)
                 putExtra(ScreenMirroringService.EXTRA_FPS, 30)
-                putExtra(ScreenMirroringService.EXTRA_BITRATE, 4000000)
+                putExtra(ScreenMirroringService.EXTRA_BITRATE, 3000000)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)
@@ -105,9 +105,15 @@ fun ContinuityScreen(
     onRequestScreenCapture: () -> Unit = {},
     onOpenAccessibility: () -> Unit = {}
 ) {
-    var isConnected by remember { mutableStateOf(ContinuityService.activeClient != null) }
-    var statusText by remember { mutableStateOf(ContinuityService.lastStatus) }
+    val isConnected by ContinuityService.isSocketConnected.collectAsState()
+    val statusText by ContinuityService.connectionStatus.collectAsState()
+    var hostIp by remember { mutableStateOf("127.0.0.1") }
     var textToSend by remember { mutableStateOf("") }
+
+    // Proactively try connecting when screen loads
+    LaunchedEffect(Unit) {
+        ContinuityService.connectManually("127.0.0.1", 8765)
+    }
 
     Column(
         modifier = Modifier
@@ -163,7 +169,7 @@ fun ContinuityScreen(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Status Card
+        // Status & Connection Card
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -195,6 +201,38 @@ fun ContinuityScreen(
                             fontSize = 12.sp,
                             color = Color(0xFF94A3B8)
                         )
+                    }
+                }
+
+                if (!isConnected) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = hostIp,
+                            onValueChange = { hostIp = it },
+                            placeholder = { Text("IP (127.0.0.1 for USB)") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF0381FE),
+                                unfocusedBorderColor = Color(0xFF334155)
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        Button(
+                            onClick = {
+                                ContinuityService.connectManually(hostIp.trim(), 8765)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0381FE)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Connect")
+                        }
                     }
                 }
             }

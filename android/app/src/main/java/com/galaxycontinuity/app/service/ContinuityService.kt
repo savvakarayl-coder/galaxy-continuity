@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -33,6 +34,12 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         var isRunning = false
         var activeClient: WebSocketClient? = null
         var lastStatus = "Disconnected"
+        val isSocketConnected = MutableStateFlow(false)
+        val connectionStatus = MutableStateFlow("Disconnected. Searching...")
+
+        fun connectManually(host: String, port: Int = 8765) {
+            activeClient?.connect(host, port)
+        }
     }
 
     private var nsdDiscovery: NsdDiscovery? = null
@@ -66,10 +73,18 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
 
         nsdDiscovery = NsdDiscovery(this) { host, port, name ->
             lastStatus = "Connecting to $name..."
+            connectionStatus.value = "Connecting to $name..."
             updateNotification("Connecting to $name...")
             webSocketClient?.connect(host, port)
         }
         nsdDiscovery?.startDiscovery()
+
+        // Proactively probe local USB loopback (via adb reverse) and default Mac IP
+        serviceScope.launch {
+            try {
+                webSocketClient?.connect("127.0.0.1", 8765)
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -85,6 +100,8 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         super.onDestroy()
         isRunning = false
         activeClient = null
+        isSocketConnected.value = false
+        connectionStatus.value = "Disconnected"
         serviceScope.cancel()
         nsdDiscovery?.stopDiscovery()
         clipboardSync?.stop()
@@ -96,11 +113,15 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
     // WebSocket callbacks
     override fun onConnected(macName: String) {
         lastStatus = "Connected to $macName"
+        connectionStatus.value = "Connected to $macName"
+        isSocketConnected.value = true
         updateNotification("Connected to $macName")
     }
 
     override fun onDisconnected() {
         lastStatus = "Disconnected. Searching..."
+        connectionStatus.value = "Disconnected. Searching..."
+        isSocketConnected.value = false
         updateNotification("Disconnected. Searching for Mac...")
         nsdDiscovery?.startDiscovery()
     }
