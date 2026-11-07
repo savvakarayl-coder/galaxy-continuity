@@ -130,7 +130,7 @@ fun ContinuityScreen() {
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.LaptopMac,
+                        imageVector = Icons.Default.Laptop,
                         contentDescription = "Mac",
                         tint = Color(0xFF0381FE),
                         modifier = Modifier.size(28.dp)
