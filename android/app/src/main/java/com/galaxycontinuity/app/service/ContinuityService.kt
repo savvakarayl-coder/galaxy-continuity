@@ -33,7 +33,16 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         super.onCreate()
         isRunning = true
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Searching for Mac on Wi-Fi..."))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            } else {
+                0
+            }
+            startForeground(NOTIFICATION_ID, buildNotification("Searching for Mac on Wi-Fi..."), type)
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification("Searching for Mac on Wi-Fi..."))
+        }
 
         webSocketClient = WebSocketClient(this, this)
         activeClient = webSocketClient
