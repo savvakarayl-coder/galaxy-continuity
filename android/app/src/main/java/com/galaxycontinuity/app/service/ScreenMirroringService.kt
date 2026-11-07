@@ -4,8 +4,11 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.ImageReader
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -18,6 +21,7 @@ import android.view.Surface
 import androidx.core.app.NotificationCompat
 import com.galaxycontinuity.app.network.StreamPacket
 import kotlinx.coroutines.*
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 
 class ScreenMirroringService : Service() {
@@ -36,17 +40,26 @@ class ScreenMirroringService : Service() {
         const val EXTRA_HEIGHT = "extra_height"
         const val EXTRA_FPS = "extra_fps"
         const val EXTRA_BITRATE = "extra_bitrate"
+        const val EXTRA_FORMAT = "extra_format" // "h264" or "jpeg"
 
         var isStreaming = false
             private set
+
+        // Cache granted MediaProjection tokens during active application lifecycle
+        var cachedResultCode: Int? = null
+        var cachedResultData: Intent? = null
     }
 
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var mediaCodec: MediaCodec? = null
     private var inputSurface: Surface? = null
+    private var imageReader: ImageReader? = null
     private var streamingJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // H.264 SPS/PPS parameter set cache
+    private var spsPpsBuffer: ByteArray? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -56,21 +69,34 @@ class ScreenMirroringService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopScreenMirroring("user_requested")
+                val reason = intent.getStringExtra("reason") ?: "user_requested"
+                stopScreenMirroring(reason)
                 stopSelf()
             }
             ACTION_START -> {
-                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
-                val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
+                var resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
+                var resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
+
+                if (resultData != null && resultCode == Activity.RESULT_OK) {
+                    cachedResultCode = resultCode
+                    cachedResultData = resultData
+                } else if (cachedResultData != null && cachedResultCode == Activity.RESULT_OK) {
+                    resultCode = cachedResultCode!!
+                    resultData = cachedResultData
+                }
+
                 val width = intent.getIntExtra(EXTRA_WIDTH, 1080)
                 val height = intent.getIntExtra(EXTRA_HEIGHT, 2400)
                 val fps = intent.getIntExtra(EXTRA_FPS, 30).coerceAtLeast(1)
                 val bitrate = intent.getIntExtra(EXTRA_BITRATE, 4000000).coerceAtLeast(500000)
+                val format = intent.getStringExtra(EXTRA_FORMAT) ?: "h264"
 
                 if (resultCode == Activity.RESULT_OK && resultData != null) {
-                    startMirroring(resultCode, resultData, width, height, fps, bitrate)
+                    startMirroring(resultCode, resultData, width, height, fps, bitrate, format)
                 } else {
-                    Log.e(TAG, "Cannot start screen mirroring without valid result code & data")
+                    Log.w(TAG, "Cannot start screen mirroring: missing MediaProjection user consent")
+                    // Notify macOS immediately so it does not hang waiting for frames until stall watchdog
+                    ContinuityService.activeClient?.sendScreenStop("media_projection_permission_required")
                     stopSelf()
                 }
             }
@@ -84,7 +110,8 @@ class ScreenMirroringService : Service() {
         width: Int,
         height: Int,
         fps: Int,
-        bitrate: Int
+        bitrate: Int,
+        format: String
     ) {
         if (isStreaming) {
             Log.d(TAG, "Screen mirroring already running; ignoring restart")
@@ -106,6 +133,7 @@ class ScreenMirroringService : Service() {
 
         val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
         if (mpManager == null) {
+            ContinuityService.activeClient?.sendScreenStop("projection_service_unavailable")
             stopSelf()
             return
         }
@@ -119,10 +147,19 @@ class ScreenMirroringService : Service() {
         }, Handler(Looper.getMainLooper()))
 
         try {
-            setupMediaCodecAndVirtualDisplay(width, height, fps, bitrate)
+            if (format.equals("jpeg", ignoreCase = true)) {
+                setupImageReaderAndVirtualDisplay(width, height)
+            } else {
+                try {
+                    setupMediaCodecAndVirtualDisplay(width, height, fps, bitrate)
+                } catch (e: Exception) {
+                    Log.w(TAG, "MediaCodec setup failed, falling back to ImageReader JPEG stream", e)
+                    setupImageReaderAndVirtualDisplay(width, height)
+                }
+            }
             isStreaming = true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize encoder or virtual display", e)
+            Log.e(TAG, "Failed to initialize video encoder or virtual display", e)
             stopScreenMirroring("init_error")
         }
     }
@@ -133,7 +170,7 @@ class ScreenMirroringService : Service() {
         fps: Int,
         bitrate: Int
     ) {
-        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+        val mediaFormat = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
@@ -141,7 +178,7 @@ class ScreenMirroringService : Service() {
         }
 
         val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        codec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         inputSurface = codec.createInputSurface()
         codec.start()
         mediaCodec = codec
@@ -172,8 +209,25 @@ class ScreenMirroringService : Service() {
                             val outData = ByteArray(bufferInfo.size)
                             outputBuffer.get(outData)
 
+                            // Cache SPS/PPS parameter sets
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                                spsPpsBuffer = outData.clone()
+                            }
+
+                            // Prepend SPS/PPS to IDR keyframe if available to ensure decoder lock
+                            val finalPayload = if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0 &&
+                                spsPpsBuffer != null && !outData.contentEquals(spsPpsBuffer!!)
+                            ) {
+                                val combined = ByteArray(spsPpsBuffer!!.size + outData.size)
+                                System.arraycopy(spsPpsBuffer!!, 0, combined, 0, spsPpsBuffer!!.size)
+                                System.arraycopy(outData, 0, combined, spsPpsBuffer!!.size, outData.size)
+                                combined
+                            } else {
+                                outData
+                            }
+
                             // Frame into 5-byte packet: streamType 0x01 (Screen)
-                            val packet = StreamPacket.pack(StreamPacket.TYPE_SCREEN, outData)
+                            val packet = StreamPacket.pack(StreamPacket.TYPE_SCREEN, finalPayload)
                             ContinuityService.activeClient?.sendBinary(packet)
                         }
                         codec.releaseOutputBuffer(outputIndex, false)
@@ -185,6 +239,65 @@ class ScreenMirroringService : Service() {
                 }
             }
         }
+    }
+
+    /**
+     * Fallback/JPEG pipeline: Uses ImageReader with RGBA_8888 and compresses frames to JPEG.
+     * Guarantees 100% interoperability with macOS NSImage(data:).
+     */
+    private fun setupImageReaderAndVirtualDisplay(width: Int, height: Int) {
+        val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+        val metrics: DisplayMetrics = resources.displayMetrics
+
+        val handlerThread = HandlerThread("ScreenCaptureThread").also { it.start() }
+        val handler = Handler(handlerThread.looper)
+
+        reader.setOnImageAvailableListener({ r ->
+            val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+            try {
+                val planes = image.planes
+                val buffer = planes[0].buffer
+                val pixelStride = planes[0].pixelStride
+                val rowStride = planes[0].rowStride
+                val rowPadding = rowStride - pixelStride * width
+
+                val bitmap = Bitmap.createBitmap(
+                    width + rowPadding / pixelStride,
+                    height,
+                    Bitmap.Config.ARGB_8888
+                )
+                bitmap.copyPixelsFromBuffer(buffer)
+
+                val finalBitmap = if (rowPadding == 0) bitmap else Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                val out = ByteArrayOutputStream()
+                finalBitmap.compress(Bitmap.CompressFormat.JPEG, 75, out)
+                val jpegBytes = out.toByteArray()
+
+                val packet = StreamPacket.pack(StreamPacket.TYPE_SCREEN, jpegBytes)
+                ContinuityService.activeClient?.sendBinary(packet)
+
+                if (finalBitmap !== bitmap) {
+                    bitmap.recycle()
+                }
+                finalBitmap.recycle()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error encoding screen JPEG frame: ${e.message}")
+            } finally {
+                image.close()
+            }
+        }, handler)
+
+        virtualDisplay = mediaProjection?.createVirtualDisplay(
+            "GalaxyContinuityScreen",
+            width,
+            height,
+            metrics.densityDpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            reader.surface,
+            null,
+            handler
+        )
+        imageReader = reader
     }
 
     fun stopScreenMirroring(reason: String = "user_dismissed") {
@@ -204,6 +317,9 @@ class ScreenMirroringService : Service() {
 
             inputSurface?.release()
             inputSurface = null
+
+            imageReader?.close()
+            imageReader = null
 
             mediaProjection?.stop()
             mediaProjection = null

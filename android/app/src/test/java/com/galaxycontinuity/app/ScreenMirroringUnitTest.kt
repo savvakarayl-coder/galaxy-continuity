@@ -81,4 +81,70 @@ class ScreenMirroringUnitTest {
         assertTrue(RemoteInputMapper.isValidAction("scroll"))
         assertFalse(RemoteInputMapper.isValidAction("invalid_action"))
     }
+
+    @Test
+    fun testResolveUpStrokeWithNormalDown() {
+        // Normal down event preceded up
+        val downTime = 1000L
+        val currentTime = 1150L
+        val stroke = RemoteInputMapper.resolveUpStroke(
+            pixelX = 500f,
+            pixelY = 600f,
+            downX = 100f,
+            downY = 200f,
+            downTime = downTime,
+            currentTime = currentTime
+        )
+
+        assertEquals(100f, stroke.startX, 0.001f)
+        assertEquals(200f, stroke.startY, 0.001f)
+        assertEquals(500f, stroke.endX, 0.001f)
+        assertEquals(600f, stroke.endY, 0.001f)
+        assertEquals(150L, stroke.durationMs)
+    }
+
+    @Test
+    fun testResolveUpStrokeDefensiveGuardForMissedDown() {
+        // Missed down event (downTime == 0L)
+        val stroke = RemoteInputMapper.resolveUpStroke(
+            pixelX = 540f,
+            pixelY = 1200f,
+            downX = 0f,
+            downY = 0f,
+            downTime = 0L,
+            currentTime = 1730940000000L
+        )
+
+        // Must produce an in-place tap at (540, 1200), NOT a diagonal drag from (0, 0)
+        assertEquals(540f, stroke.startX, 0.001f)
+        assertEquals(1200f, stroke.startY, 0.001f)
+        assertEquals(540f, stroke.endX, 0.001f)
+        assertEquals(1200f, stroke.endY, 0.001f)
+        assertEquals(50L, stroke.durationMs)
+    }
+
+    @Test
+    fun testResolveUpStrokeDurationClamping() {
+        // Long drag held for 2000ms should clamp to 400ms max
+        val stroke = RemoteInputMapper.resolveUpStroke(
+            pixelX = 300f,
+            pixelY = 400f,
+            downX = 100f,
+            downY = 200f,
+            downTime = 1000L,
+            currentTime = 3000L
+        )
+        assertEquals(400L, stroke.durationMs)
+
+        // Ultra-short tap (< 20ms) should clamp to 20ms min
+        val quickStroke = RemoteInputMapper.resolveUpStroke(
+            pixelX = 300f,
+            pixelY = 400f,
+            downX = 300f,
+            downY = 400f,
+            downTime = 1000L,
+            currentTime = 1005L
+        )
+        assertEquals(20L, quickStroke.durationMs)
+    }
 }

@@ -69,4 +69,19 @@ class StreamPacketTest {
         assertEquals(0, unpacked!!.length)
         assertEquals(0, unpacked.payload.size)
     }
+
+    @Test
+    fun testScreenStreamPacketWithJpegPayload() {
+        val fakeScreenJpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0x01, 0x02)
+        val packet = StreamPacket.pack(StreamPacket.TYPE_SCREEN, fakeScreenJpeg)
+
+        assertEquals(StreamPacket.HEADER_SIZE + fakeScreenJpeg.size, packet.size)
+        assertEquals(StreamPacket.TYPE_SCREEN, packet[0])
+
+        val unpacked = StreamPacket.unpack(packet)
+        assertNotNull(unpacked)
+        assertEquals(StreamPacket.TYPE_SCREEN, unpacked!!.streamType)
+        assertEquals(fakeScreenJpeg.size, unpacked.length)
+        assertTrue(unpacked.payload[0] == 0xFF.toByte() && unpacked.payload[1] == 0xD8.toByte())
+    }
 }

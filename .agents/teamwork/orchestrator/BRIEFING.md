@@ -97,7 +97,7 @@ Orchestrate the complete 1:1 Apple Continuity replacement between macOS and Sams
 
 ## Active Timers
 - Heartbeat cron: edb875f9-c921-490b-8f47-2beeb22c6414/task-58 (recurring every 10 min)
-- Safety timer: edb875f9-c921-490b-8f47-2beeb22c6414/task-622 (600s)
+- Safety timer: edb875f9-c921-490b-8f47-2beeb22c6414/task-640 (600s)
 - On succession: kill all timers before spawning successor
 - On context truncation: handle timers as step 4 of the State Recovery section of your prompt says
 
