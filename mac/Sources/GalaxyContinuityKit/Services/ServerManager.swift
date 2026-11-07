@@ -681,11 +681,17 @@ public final class ServerManager {
             let app = message.app ?? "Samsung Phone"
             let title = message.title ?? app
             let text = message.text ?? ""
+            let notifId = message.id ?? UUID().uuidString
+            let pkg = message.packageName ?? ""
+            let canReply = message.canReply ?? false
             Task { @MainActor in
-                NotificationService.shared.showNotification(
-                    title: "📱 \(title)",
-                    subtitle: "via \(app)",
-                    body: text
+                NotificationService.shared.showPhoneNotification(
+                    id: notifId,
+                    packageName: pkg,
+                    appName: app,
+                    title: title,
+                    body: text,
+                    canReply: canReply
                 )
             }
 
@@ -785,6 +791,16 @@ public final class ServerManager {
             )
             self.broadcastMessage(msg)
         }
+    }
+
+    public func sendNotificationReply(id: String, packageName: String, replyText: String) {
+        let msg = ContinuityMessage(
+            type: "notification_reply",
+            id: id,
+            replyText: replyText,
+            packageName: packageName
+        )
+        self.broadcastMessage(msg)
     }
 
     // MARK: - IP helper

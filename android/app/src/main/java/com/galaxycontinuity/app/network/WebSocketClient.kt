@@ -33,6 +33,9 @@ class WebSocketClient(
         fun onCameraStart(lens: String, quality: String, fps: Int)
         fun onCameraStop()
         fun onCameraControl(action: String, lens: String?, zoom: Double?, torch: Boolean?)
+
+        // Milestone 4: Notification Relay & Quick Reply
+        fun onNotificationReply(id: String, packageName: String, replyText: String)
     }
 
     private val tag = "GalaxyWS"
@@ -145,6 +148,14 @@ class WebSocketClient(
                             mainHandler.post { listener.onCameraControl(action, lens, zoom, torch) }
                         }
 
+                        // Milestone 4: Notification Relay & Quick Reply
+                        "notification_reply" -> {
+                            val id = json.optString("id")
+                            val pkg = json.optString("packageName")
+                            val replyText = json.optString("replyText")
+                            mainHandler.post { listener.onNotificationReply(id, pkg, replyText) }
+                        }
+
                         else -> {
                             Log.d(tag, "Ignoring unhandled message type: $type")
                         }
@@ -251,16 +262,31 @@ class WebSocketClient(
         webSocket?.send(json.toString())
     }
 
-    fun sendNotification(app: String, title: String, text: String) {
+    fun sendNotification(
+        id: String = java.util.UUID.randomUUID().toString(),
+        packageName: String = "",
+        app: String,
+        title: String,
+        text: String,
+        canReply: Boolean = false
+    ) {
         if (!isConnected) return
         val json = JSONObject().apply {
             put("type", "phone_notification")
+            put("id", id)
+            put("packageName", packageName)
             put("app", app)
             put("title", title)
             put("text", text)
+            put("canReply", canReply)
             put("timestamp", System.currentTimeMillis())
         }
         webSocket?.send(json.toString())
+    }
+
+    // Overload for backward compatibility
+    fun sendNotification(app: String, title: String, text: String) {
+        sendNotification(java.util.UUID.randomUUID().toString(), "", app, title, text, false)
     }
 
     fun disconnect() {

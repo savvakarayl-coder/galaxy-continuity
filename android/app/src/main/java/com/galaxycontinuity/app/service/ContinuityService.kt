@@ -216,6 +216,11 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         ContinuityCameraService.instance?.handleControl(action, lens, zoom, torch)
     }
 
+    override fun onNotificationReply(id: String, packageName: String, replyText: String) {
+        android.util.Log.d("ContinuityService", "Received notification_reply for $id ($packageName): $replyText")
+        NotificationForwarderService.replyToNotification(id, packageName, replyText)
+    }
+
     private fun showTransferNotification(fileId: String, filename: String, percentage: Double, completed: Boolean, file: File? = null) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         val builder = NotificationCompat.Builder(this, CHANNEL_QUICK_DROP)

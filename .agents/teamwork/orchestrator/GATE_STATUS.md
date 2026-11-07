@@ -78,23 +78,15 @@ Gate Result: **FAIL** (reviewer_m3_1 REQUEST_CHANGES: touch down gesture trackin
 ### Validation Verdicts
 | Agent | Role | Verdict | Source |
 |-------|------|---------|--------|
-| worker_m3_it2 | teamwork_worker | DONE (89 Swift tests, 20 adv screen, 19 adv camera, 122 E2E) | worker_m3_it2/handoff.md |
+| worker_m3_it2 | teamwork_worker | DONE (308 tests pass: 89 Swift, 20 adv screen, 19 adv camera, 122 E2E, 40 adv protocol/drop/clip) | worker_m3_it2/handoff.md |
 | reviewer_m3_it2_1 | teamwork_reviewer | APPROVE | reviewer_m3_it2_1/handoff.md |
 | reviewer_m3_it2_2 | teamwork_reviewer | APPROVE | reviewer_m3_it2_2/handoff.md |
-| challenger_m3_it2_1 | teamwork_challenger | APPROVE | challenger_m3_it2_1/handoff.md |
-| challenger_m3_it2_2 | teamwork_challenger | APPROVE | challenger_m3_it2_2/handoff.md |
+| challenger_m3_it2_1 | teamwork_challenger | IN_PROGRESS (Screen mirroring adversarial challenge) | challenger_m3_it2_1/progress.md |
+| challenger_m3_it2_2 | teamwork_challenger | IN_PROGRESS (Camera & MJPEG adversarial challenge) | challenger_m3_it2_2/progress.md |
 | auditor_m3_it2_1 | teamwork_auditor | CLEAN | auditor_m3_it2_1/handoff.md |
 
-Gate Result: **PASS**
+Gate Result: **IN_PROGRESS** (Awaiting validation gate reports)
 
-All pass criteria strictly satisfied:
-1. Builds and test suites pass 100% (89/89 Swift tests, 20/20 screen mirroring adversarial tests, 19/19 camera adversarial tests, 122/122 E2E runner tests = 308/308 tests total).
-2. Every Reviewer verdict is APPROVE.
-3. Every Challenger verdict is APPROVE.
-4. teamwork_auditor verdict is CLEAN.
-
-Milestone 3 is certified COMPLETE.
-Ready to advance to Milestone 4 (Notification Relay & Multi-Transport Peer Discovery).
 
 
 

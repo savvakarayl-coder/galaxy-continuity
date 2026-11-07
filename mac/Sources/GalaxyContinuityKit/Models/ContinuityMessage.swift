@@ -12,6 +12,7 @@ public struct BatteryInfo: Codable, Equatable {
 
 public struct ContinuityMessage: Codable, Equatable {
     public var type: String
+    public var id: String?
     public var device: String?
     public var platform: String?
     public var version: String?
@@ -71,6 +72,7 @@ public struct ContinuityMessage: Codable, Equatable {
 
     public init(
         type: String,
+        id: String? = nil,
         device: String? = nil,
         platform: String? = nil,
         version: String? = nil,
@@ -119,6 +121,7 @@ public struct ContinuityMessage: Codable, Equatable {
         resolution: String? = nil
     ) {
         self.type = type
+        self.id = id
         self.device = device
         self.platform = platform
         self.version = version
