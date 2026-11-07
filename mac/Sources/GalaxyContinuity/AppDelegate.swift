@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import GalaxyContinuityKit
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -8,6 +9,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.accessory)
         setupMenuBar()
         setupPopover()
         startServices()

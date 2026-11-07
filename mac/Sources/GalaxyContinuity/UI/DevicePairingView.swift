@@ -1,6 +1,7 @@
 import AppKit
 import CoreImage.CIFilterBuiltins
 import SwiftUI
+import GalaxyContinuityKit
 
 public struct DevicePairingView: View {
     @ObservedObject var state = DeviceState.shared

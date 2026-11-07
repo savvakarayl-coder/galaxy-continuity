@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import GalaxyContinuityKit
 
 public struct QuickDropView: View {
     @ObservedObject var state = DeviceState.shared

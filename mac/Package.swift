@@ -7,6 +7,10 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
+        .library(
+            name: "GalaxyContinuityKit",
+            targets: ["GalaxyContinuityKit"]
+        ),
         .executable(
             name: "GalaxyContinuity",
             targets: ["GalaxyContinuity"]
@@ -14,10 +18,24 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        .target(
+            name: "GalaxyContinuityKit",
+            dependencies: [],
+            path: "Sources/GalaxyContinuityKit"
+        ),
         .executableTarget(
             name: "GalaxyContinuity",
-            dependencies: [],
+            dependencies: [
+                "GalaxyContinuityKit"
+            ],
             path: "Sources/GalaxyContinuity"
+        ),
+        .testTarget(
+            name: "GalaxyContinuityTests",
+            dependencies: [
+                "GalaxyContinuityKit"
+            ],
+            path: "Tests/GalaxyContinuityTests"
         )
     ]
 )

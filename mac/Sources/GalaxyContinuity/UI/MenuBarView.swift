@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import GalaxyContinuityKit
 
 public struct MenuBarView: View {
     @ObservedObject var state = DeviceState.shared

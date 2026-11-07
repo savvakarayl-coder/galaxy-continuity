@@ -346,10 +346,7 @@ public final class ServerManager {
     private func performWebSocketHandshake(client: ConnectedClient, key: String, headerEndOffset: Int) {
         client.readBuffer.removeSubrange(0..<headerEndOffset)
 
-        let guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-        let fullKey = key + guid
-        let hash = Insecure.SHA1.hash(data: Data(fullKey.utf8))
-        let acceptValue = Data(hash).base64EncodedString()
+        let acceptValue = WebSocketFramer.computeAcceptKey(for: key)
 
         let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(acceptValue)\r\n\r\n"
         sendRaw(client: client, data: Data(response.utf8))
@@ -376,49 +373,8 @@ public final class ServerManager {
     }
 
     private func processWebSocketData(_ client: ConnectedClient) {
-        while client.readBuffer.count >= 2 {
-            let b0 = client.readBuffer[0]
-            let b1 = client.readBuffer[1]
-            let opcode = b0 & 0x0F
-            let isMasked = (b1 & 0x80) != 0
-            var payloadLen = Int(b1 & 0x7F)
-            var offset = 2
-
-            if payloadLen == 126 {
-                guard client.readBuffer.count >= offset + 2 else { return }
-                let high = Int(client.readBuffer[offset])
-                let low = Int(client.readBuffer[offset + 1])
-                payloadLen = (high << 8) | low
-                offset += 2
-            } else if payloadLen == 127 {
-                guard client.readBuffer.count >= offset + 8 else { return }
-                var len: UInt64 = 0
-                for i in 0..<8 {
-                    len = (len << 8) | UInt64(client.readBuffer[offset + i])
-                }
-                payloadLen = Int(len)
-                offset += 8
-            }
-
-            var mask = [UInt8]()
-            if isMasked {
-                guard client.readBuffer.count >= offset + 4 else { return }
-                mask = Array(client.readBuffer[offset..<(offset + 4)])
-                offset += 4
-            }
-
-            guard client.readBuffer.count >= offset + payloadLen else { return }
-
-            var payload = Array(client.readBuffer[offset..<(offset + payloadLen)])
-            if isMasked {
-                for i in 0..<payload.count {
-                    payload[i] ^= mask[i % 4]
-                }
-            }
-
-            client.readBuffer.removeSubrange(0..<(offset + payloadLen))
-
-            handleWebSocketFrame(client: client, opcode: opcode, payload: Data(payload))
+        while let frame = WebSocketFramer.decodeFrame(from: &client.readBuffer) {
+            handleWebSocketFrame(client: client, opcode: frame.opcode, payload: frame.payload)
         }
     }
 
@@ -514,23 +470,7 @@ public final class ServerManager {
     }
 
     private func sendFrame(client: ConnectedClient, opcode: UInt8, payload: Data) {
-        var frame = Data()
-        frame.append(0x80 | opcode) // FIN + opcode
-
-        let len = payload.count
-        if len <= 125 {
-            frame.append(UInt8(len))
-        } else if len <= 65535 {
-            frame.append(126)
-            var beLen = UInt16(len).bigEndian
-            frame.append(Data(bytes: &beLen, count: 2))
-        } else {
-            frame.append(127)
-            var beLen = UInt64(len).bigEndian
-            frame.append(Data(bytes: &beLen, count: 8))
-        }
-
-        frame.append(payload)
+        let frame = WebSocketFramer.encodeFrame(opcode: opcode, payload: payload, fin: true, isMasked: false)
         sendRaw(client: client, data: frame)
     }
 
