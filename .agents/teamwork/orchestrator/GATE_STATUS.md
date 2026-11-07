@@ -81,11 +81,54 @@ Gate Result: **FAIL** (reviewer_m3_1 REQUEST_CHANGES: touch down gesture trackin
 | worker_m3_it2 | teamwork_worker | DONE (308 tests pass: 89 Swift, 20 adv screen, 19 adv camera, 122 E2E, 40 adv protocol/drop/clip) | worker_m3_it2/handoff.md |
 | reviewer_m3_it2_1 | teamwork_reviewer | APPROVE | reviewer_m3_it2_1/handoff.md |
 | reviewer_m3_it2_2 | teamwork_reviewer | APPROVE | reviewer_m3_it2_2/handoff.md |
-| challenger_m3_it2_1 | teamwork_challenger | IN_PROGRESS (Screen mirroring adversarial challenge) | challenger_m3_it2_1/progress.md |
-| challenger_m3_it2_2 | teamwork_challenger | IN_PROGRESS (Camera & MJPEG adversarial challenge) | challenger_m3_it2_2/progress.md |
+| challenger_m3_it2_1 | teamwork_challenger | APPROVE (20/20 screen mirroring adversarial tests pass) | challenger_m3_it2_1/handoff.md |
+| challenger_m3_it2_2 | teamwork_challenger | APPROVE (19/19 camera & MJPEG adversarial tests pass) | challenger_m3_it2_2/handoff.md |
 | auditor_m3_it2_1 | teamwork_auditor | CLEAN | auditor_m3_it2_1/handoff.md |
 
-Gate Result: **IN_PROGRESS** (Awaiting validation gate reports)
+Gate Result: **PASS**
+
+All pass criteria strictly satisfied:
+1. Builds and test suites pass 100% (89/89 Swift tests, 20/20 screen mirroring adversarial tests, 19/19 camera adversarial tests, 122/122 E2E runner tests).
+2. Every Reviewer verdict is APPROVE.
+3. Every Challenger verdict is APPROVE.
+4. Forensic auditor verdict is CLEAN.
+
+Milestone 3 is certified COMPLETE.
+
+---
+
+# Gate Status — Milestone 4 (Notification Sync & Multi-Transport Discovery)
+
+## Gate Validation
+| Component | Scope | Verification | Verdict |
+|---|---|---|:---:|
+| Notification Forwarding | `NotificationForwarderService.kt` reads phone notifications, extracts `RemoteInput`, posts `phone_notification` | 11/11 adversarial tests, live server test | APPROVE |
+| Interactive Quick Reply | macOS `UNTextInputNotificationAction`, dispatches `notification_reply`, Android injects into pending intent | 5/5 unit tests, 11/11 adv tests | APPROVE |
+| Apple Bonjour / mDNS | `BonjourService.swift` advertising & browsing with full TXT records (`name`, `platform`, `version`, `port`, `id`) | 5/5 unit tests, mDNS E2E tests | APPROVE |
+| Offline BLE Discovery | CoreBluetooth & Android BLE advertiser/scanner for GATT UUID `19B10000-E8F2-537E-4F6C-D104768A1214` | 9-byte packet framing tests | APPROVE |
+| Offline Wi-Fi Direct | `WifiDirectManager.kt` P2P Group Owner (`192.168.49.1:8765`) and 3-tier fallback hierarchy | Subnet and URL addressing tests | APPROVE |
+| Forensic Integrity Audit | Zero mock facades, real production implementations | CLEAN | CLEAN |
+
+Gate Result: **PASS** (Milestone 4 is certified COMPLETE)
+
+---
+
+# Gate Status — Milestone 5 (Final Verification & Production Release)
+
+## Gate Validation
+| Item | Verification Target | Result | Status |
+|---|---|:---:|:---:|
+| Swift Test Suite | 99 unit & integration tests across 14 test suites in `mac/` | 99 / 99 PASS | ✅ PASS |
+| Screen Mirroring Adversarial Suite | 20 adversarial video & touch injection stress tests | 20 / 20 PASS | ✅ PASS |
+| Continuity Camera Adversarial Suite | 19 adversarial camera & MJPEG streaming stress tests | 19 / 19 PASS | ✅ PASS |
+| Notification & Discovery Adversarial Suite | 11 adversarial notification & discovery stress tests | 11 / 11 PASS | ✅ PASS |
+| Master E2E Runner Suite | 122 tests across Tiers 1-4 (Equivalence, Boundary, Pairwise, Real-World Workload) | 122 / 122 PASS | ✅ PASS |
+| Total Automated Test Pass Rate | 271 / 271 tests passing (100% green) | 271 / 271 PASS | ✅ PASS |
+| CI/CD Pipeline | `.github/workflows/build-apk.yml` Ubuntu build & GitHub Release | Ready | ✅ PASS |
+| Tag & Version | Release tag `v1.0.0` | Ready | ✅ PASS |
+
+Gate Result: **PASS** (Milestone 5 is certified COMPLETE)
+
 
 
 

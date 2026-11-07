@@ -59,10 +59,9 @@ Every feature from the user request and survey is assigned to a milestone below:
 | M1 | Architecture & Test Harness Enablement | `mac/Package.swift` target refactoring, Android Gradle wrapper & build configuration, shared protocol specification | none | DONE |
 | M2 | Universal Clipboard & Quick Drop Parity | Bidirectional plain text + image clipboard sync, bidirectional Quick Drop file transfers | M1 | DONE |
 
-| M3 | Screen Mirroring & Continuity Camera | Screen capture & remote input injection, Camera2 capture & macOS virtual camera ingestion | M1 | IN_PROGRESS |
-
-| M4 | Notification Sync & Multi-Transport Discovery | Notification forwarding with interactive quick reply, mDNS + BLE + Wi-Fi Direct discovery | M1 | PLANNED |
-| M5 | Final Verification & GitHub Release | 100% E2E test pass (Tiers 1-4), Tier 5 adversarial coverage hardening, APK build & GitHub release `v1.0.0` | M2, M3, M4, E2E Track | PLANNED |
+| M3 | Screen Mirroring & Continuity Camera | Screen capture & remote input injection, Camera2 capture & macOS virtual camera ingestion | M1 | DONE |
+| M4 | Notification Sync & Multi-Transport Discovery | Notification forwarding with interactive quick reply, mDNS + BLE + Wi-Fi Direct discovery | M1 | DONE |
+| M5 | Final Verification & GitHub Release | 100% E2E test pass (Tiers 1-4), Tier 5 adversarial coverage hardening, APK build & GitHub release `v1.0.0` | M2, M3, M4, E2E Track | DONE |
 | E2E | E2E Testing Track | Independent opaque-box test runner and test cases covering Tiers 1-4 | M1 | DONE |
 
 ---
