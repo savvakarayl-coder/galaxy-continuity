@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Combine
 
@@ -47,6 +48,25 @@ public final class DeviceState: ObservableObject {
     @Published public var showPairingSheet: Bool = false
     @Published public var pingMessage: String? = nil
 
+    // Screen Mirroring
+    @Published public var isScreenMirroringActive: Bool = false
+    @Published public var screenWidth: Int = 1080
+    @Published public var screenHeight: Int = 2400
+    @Published public var screenFps: Int = 30
+    @Published public var screenBitrate: Int = 4000000
+    @Published public var lastScreenFrame: NSImage? = nil
+    @Published public var screenFrameCount: Int = 0
+
+    // Continuity Camera
+    @Published public var isCameraActive: Bool = false
+    @Published public var cameraLens: String = "back"
+    @Published public var cameraQuality: String = "1080p"
+    @Published public var cameraFps: Int = 30
+    @Published public var cameraZoom: Double = 1.0
+    @Published public var cameraTorch: Bool = false
+    @Published public var lastCameraFrame: NSImage? = nil
+    @Published public var cameraFrameCount: Int = 0
+
     private init() {}
 
     public func setConnected(device: String, platform: String, battery: BatteryInfo?) {
@@ -65,6 +85,8 @@ public final class DeviceState: ObservableObject {
         self.connectedDeviceName = "No Device Connected"
         self.connectedPlatform = ""
         self.hasBatteryInfo = false
+        self.setScreenMirroringActive(false)
+        self.setCameraActive(false)
     }
 
     public func updateBattery(level: Int, charging: Bool) {
@@ -78,5 +100,50 @@ public final class DeviceState: ObservableObject {
         if self.transferredFiles.count > 25 {
             self.transferredFiles.removeLast()
         }
+    }
+
+    public func setScreenMirroringActive(_ active: Bool, width: Int? = nil, height: Int? = nil, fps: Int? = nil, bitrate: Int? = nil) {
+        self.isScreenMirroringActive = active
+        if let w = width, w > 0 { self.screenWidth = w }
+        if let h = height, h > 0 { self.screenHeight = h }
+        if let f = fps, f > 0 { self.screenFps = f }
+        if let b = bitrate, b > 0 { self.screenBitrate = b }
+        if !active {
+            self.lastScreenFrame = nil
+            self.screenFrameCount = 0
+        }
+    }
+
+    public func updateScreenFrame(_ image: NSImage) {
+        self.lastScreenFrame = image
+        self.screenFrameCount += 1
+    }
+
+    public func setCameraActive(_ active: Bool, lens: String? = nil, quality: String? = nil, fps: Int? = nil) {
+        self.isCameraActive = active
+        if let l = lens { self.cameraLens = l }
+        if let q = quality { self.cameraQuality = q }
+        if let f = fps, f > 0 { self.cameraFps = f }
+        if !active {
+            self.lastCameraFrame = nil
+            self.cameraFrameCount = 0
+        }
+    }
+
+    public func updateCameraLens(_ lens: String) {
+        self.cameraLens = lens
+    }
+
+    public func updateCameraZoom(_ zoom: Double) {
+        self.cameraZoom = zoom
+    }
+
+    public func updateCameraTorch(_ torch: Bool) {
+        self.cameraTorch = torch
+    }
+
+    public func updateCameraFrame(_ image: NSImage) {
+        self.lastCameraFrame = image
+        self.cameraFrameCount += 1
     }
 }

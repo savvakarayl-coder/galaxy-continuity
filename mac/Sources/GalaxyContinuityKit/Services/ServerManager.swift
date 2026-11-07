@@ -42,6 +42,7 @@ public final class ServerManager {
     private let serverQueue = DispatchQueue(label: "com.galaxycontinuity.server", qos: .userInitiated)
     private var clients: [UUID: ConnectedClient] = [:]
     private var sharedFiles: [String: (filename: String, url: URL)] = [:]
+    private var cameraStreamClients: [UUID: ConnectedClient] = [:]
 
     public private(set) var currentPort: Int = 8765
 
@@ -81,6 +82,7 @@ public final class ServerManager {
                 client.close()
             }
             self.clients.removeAll()
+            self.cameraStreamClients.removeAll()
 
             if self.serverSocket >= 0 {
                 Darwin.close(self.serverSocket)
@@ -201,6 +203,7 @@ public final class ServerManager {
     }
 
     private func removeClient(_ client: ConnectedClient) {
+        cameraStreamClients.removeValue(forKey: client.id)
         client.close()
         clients.removeValue(forKey: client.id)
 
@@ -327,6 +330,39 @@ public final class ServerManager {
                 let notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 sendRaw(client: client, data: Data(notFound.utf8))
             }
+            removeClient(client)
+            return
+        }
+
+        // GET /api/camera/stream, /camera/mjpeg, /api/camera/snapshot, /camera/snapshot
+        if method == "GET" && (path == "/api/camera/stream" || path == "/camera/mjpeg" || path == "/api/camera/snapshot" || path == "/camera/snapshot" || path.starts(with: "/api/camera/stream?") || path.starts(with: "/camera/mjpeg?")) {
+            client.readBuffer.removeAll()
+            guard let jpeg = VirtualWebcamFeeder.shared.getLatestJpeg() else {
+                let response = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                sendRaw(client: client, data: Data(response.utf8))
+                removeClient(client)
+                return
+            }
+
+            let isSnapshotRequest = path.contains("snapshot") || path.contains("single=true") || (headers["accept"]?.lowercased().contains("image/jpeg") == true)
+            let isExplicitStreamRequest = path.contains("stream=true") || path.contains("mjpeg=true") || (headers["accept"]?.lowercased().contains("multipart") == true)
+
+            // If client specifically requests continuous streaming (e.g. multipart Accept header or stream=true query):
+            if isExplicitStreamRequest && !isSnapshotRequest {
+                let mjpegHeader = "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=frame\r\nCache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\nConnection: close\r\n\r\n"
+                sendRaw(client: client, data: Data(mjpegHeader.utf8))
+
+                let frameHeader = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: \(jpeg.count)\r\n\r\n"
+                let frameFooter = "\r\n"
+                sendRaw(client: client, data: Data(frameHeader.utf8) + jpeg + Data(frameFooter.utf8))
+
+                cameraStreamClients[client.id] = client
+                return
+            }
+
+            // Default snapshot response (preserves test_adversarial_camera.py test_07 & test_08)
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: \(jpeg.count)\r\nConnection: close\r\n\r\n"
+            sendRaw(client: client, data: Data(response.utf8) + jpeg)
             removeClient(client)
             return
         }
@@ -571,7 +607,22 @@ public final class ServerManager {
     }
 
     private func handleIncomingBinaryFrame(client: ConnectedClient, payload: Data) {
-        // Opcode 0x2 binary frame receiver
+        guard payload.count >= 5 else {
+            print("[ServerManager] Dropping truncated binary stream packet (< 5 bytes)")
+            return
+        }
+        let streamType = payload[0]
+        let declaredLength = UInt32(payload[1]) << 24 | UInt32(payload[2]) << 16 | UInt32(payload[3]) << 8 | UInt32(payload[4])
+        let mediaPayload = payload.count > 5 ? payload.subdata(in: 5..<min(payload.count, 5 + Int(declaredLength))) : Data()
+
+        switch streamType {
+        case 0x01: // Screen Mirroring
+            ScreenMirroringService.shared.handleIncomingFrame(mediaPayload)
+        case 0x02: // Continuity Camera
+            ContinuityCameraService.shared.handleIncomingFrame(mediaPayload)
+        default:
+            print("[ServerManager] Unrecognized stream type: \(streamType)")
+        }
     }
 
     private func handleIncomingMessage(client: ConnectedClient, message: ContinuityMessage) {
@@ -638,6 +689,30 @@ public final class ServerManager {
                 )
             }
 
+        case "screen_start":
+            ScreenMirroringService.shared.handlePeerScreenStart(message: message)
+
+        case "screen_stop":
+            ScreenMirroringService.shared.handlePeerScreenStop(message: message)
+
+        case "input_event":
+            ScreenMirroringService.shared.handlePeerInputEvent(message: message)
+
+        case "input_key":
+            ScreenMirroringService.shared.handlePeerInputKey(message: message)
+
+        case "camera_start":
+            ContinuityCameraService.shared.handlePeerCameraStart(message: message)
+
+        case "camera_stop":
+            ContinuityCameraService.shared.handlePeerCameraStop(message: message)
+
+        case "camera_switch_lens":
+            ContinuityCameraService.shared.handlePeerSwitchLens(message: message)
+
+        case "camera_control":
+            ContinuityCameraService.shared.handlePeerCameraControl(message: message)
+
         default:
             break
         }
@@ -649,6 +724,15 @@ public final class ServerManager {
             guard let self = self else { return }
             for client in self.clients.values where client.isWebSocket {
                 self.sendWebSocketMessage(client: client, message: message)
+            }
+        }
+    }
+
+    public func broadcastBinary(_ data: Data) {
+        serverQueue.async { [weak self] in
+            guard let self = self else { return }
+            for client in self.clients.values where client.isWebSocket {
+                self.sendFrame(client: client, opcode: 0x2, payload: data)
             }
         }
     }
@@ -735,5 +819,43 @@ public final class ServerManager {
             }
         }
         return address
+    }
+
+    // MARK: - Camera MJPEG Stream Broadcasting
+    public func broadcastCameraJpeg(_ jpeg: Data) {
+        serverQueue.async { [weak self] in
+            guard let self = self, !self.cameraStreamClients.isEmpty else { return }
+            let frameHeader = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: \(jpeg.count)\r\n\r\n"
+            let frameFooter = "\r\n"
+            let packet = Data(frameHeader.utf8) + jpeg + Data(frameFooter.utf8)
+
+            var deadClientIds: [UUID] = []
+            for (id, client) in self.cameraStreamClients {
+                let fd = client.fd
+                let sent = packet.withUnsafeBytes { rawBuf in
+                    Darwin.send(fd, rawBuf.baseAddress, rawBuf.count, 0)
+                }
+                if sent <= 0 {
+                    deadClientIds.append(id)
+                }
+            }
+            for id in deadClientIds {
+                if let client = self.cameraStreamClients.removeValue(forKey: id) {
+                    self.removeClient(client)
+                }
+            }
+        }
+    }
+
+    public func stopCameraStreaming() {
+        serverQueue.async { [weak self] in
+            guard let self = self else { return }
+            for client in self.cameraStreamClients.values {
+                let endBoundary = "--frame--\r\n"
+                self.sendRaw(client: client, data: Data(endBoundary.utf8))
+                self.removeClient(client)
+            }
+            self.cameraStreamClients.removeAll()
+        }
     }
 }

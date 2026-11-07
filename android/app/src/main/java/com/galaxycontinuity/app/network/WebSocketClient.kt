@@ -7,6 +7,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import okhttp3.*
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -22,6 +24,15 @@ class WebSocketClient(
         fun onFileProgress(fileId: String, bytesTransferred: Long, totalBytes: Long, percentage: Double, status: String)
         fun onFileComplete(fileId: String, status: String, message: String)
         fun onPingReceived(message: String)
+
+        // Milestone 3: Screen Mirroring & Continuity Camera
+        fun onScreenStart(width: Int, height: Int, fps: Int, bitrate: Int)
+        fun onScreenStop(reason: String?)
+        fun onRemoteInput(action: String, x: Double, y: Double, button: Int)
+        fun onRemoteKey(key: String, keyCode: Int)
+        fun onCameraStart(lens: String, quality: String, fps: Int)
+        fun onCameraStop()
+        fun onCameraControl(action: String, lens: String?, zoom: Double?, torch: Boolean?)
     }
 
     private val tag = "GalaxyWS"
@@ -55,7 +66,7 @@ class WebSocketClient(
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val json = JSONObject(text)
-                    when (json.optString("type")) {
+                    when (val type = json.optString("type")) {
                         "handshake_ack" -> {
                             val macName = json.optString("device", "MacBook Pro")
                             mainHandler.post { listener.onConnected(macName) }
@@ -90,6 +101,53 @@ class WebSocketClient(
                             val msg = json.optString("message", "Ping from Mac")
                             mainHandler.post { listener.onPingReceived(msg) }
                         }
+
+                        // Milestone 3: Screen Mirroring
+                        "screen_start" -> {
+                            val width = json.optInt("width", 1080)
+                            val height = json.optInt("height", 2400)
+                            val fps = json.optInt("fps", 30)
+                            val bitrate = json.optInt("bitrate", 4000000)
+                            mainHandler.post { listener.onScreenStart(width, height, fps, bitrate) }
+                        }
+                        "screen_stop" -> {
+                            val reason = json.optString("reason", "mac_requested").ifEmpty { null }
+                            mainHandler.post { listener.onScreenStop(reason) }
+                        }
+                        "input_event" -> {
+                            val action = json.optString("action", "down")
+                            val x = json.optDouble("x", 0.5)
+                            val y = json.optDouble("y", 0.5)
+                            val button = json.optInt("button", 0)
+                            mainHandler.post { listener.onRemoteInput(action, x, y, button) }
+                        }
+                        "input_key" -> {
+                            val key = json.optString("key", "")
+                            val keyCode = json.optInt("keyCode", 0)
+                            mainHandler.post { listener.onRemoteKey(key, keyCode) }
+                        }
+
+                        // Milestone 3: Continuity Camera
+                        "camera_start" -> {
+                            val lens = if (json.has("lens")) json.getString("lens") else json.optString("facing", "back")
+                            val quality = if (json.has("quality")) json.getString("quality") else json.optString("resolution", "1080p")
+                            val fps = json.optInt("fps", 30)
+                            mainHandler.post { listener.onCameraStart(lens, quality, fps) }
+                        }
+                        "camera_stop" -> {
+                            mainHandler.post { listener.onCameraStop() }
+                        }
+                        "camera_control", "camera_switch_lens" -> {
+                            val action = json.optString("action", if (type == "camera_switch_lens") "switch_lens" else "")
+                            val lens = if (json.has("lens")) json.getString("lens") else if (json.has("facing")) json.getString("facing") else null
+                            val zoom = if (json.has("zoom")) json.getDouble("zoom") else null
+                            val torch = if (json.has("torch")) json.getBoolean("torch") else null
+                            mainHandler.post { listener.onCameraControl(action, lens, zoom, torch) }
+                        }
+
+                        else -> {
+                            Log.d(tag, "Ignoring unhandled message type: $type")
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(tag, "Error parsing message: $text", e)
@@ -123,6 +181,33 @@ class WebSocketClient(
                 put("level", level)
                 put("isCharging", false)
             })
+        }
+        webSocket?.send(json.toString())
+    }
+
+    fun sendBinary(data: ByteArray) {
+        if (!isConnected) return
+        webSocket?.send(data.toByteString())
+    }
+
+    fun sendBinary(byteString: ByteString) {
+        if (!isConnected) return
+        webSocket?.send(byteString)
+    }
+
+    fun sendScreenStop(reason: String = "user_dismissed") {
+        if (!isConnected) return
+        val json = JSONObject().apply {
+            put("type", "screen_stop")
+            put("reason", reason)
+        }
+        webSocket?.send(json.toString())
+    }
+
+    fun sendCameraStop() {
+        if (!isConnected) return
+        val json = JSONObject().apply {
+            put("type", "camera_stop")
         }
         webSocket?.send(json.toString())
     }

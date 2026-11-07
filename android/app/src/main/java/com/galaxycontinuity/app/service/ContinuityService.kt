@@ -155,6 +155,67 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         // Vibrate and sound
     }
 
+    // MARK: - Milestone 3 Screen Mirroring & Input Callbacks
+    override fun onScreenStart(width: Int, height: Int, fps: Int, bitrate: Int) {
+        android.util.Log.d("ContinuityService", "Received screen_start ($width x $height @ $fps fps)")
+        val startIntent = Intent(this, ScreenMirroringService::class.java).apply {
+            action = ScreenMirroringService.ACTION_START
+            putExtra(ScreenMirroringService.EXTRA_WIDTH, width)
+            putExtra(ScreenMirroringService.EXTRA_HEIGHT, height)
+            putExtra(ScreenMirroringService.EXTRA_FPS, fps)
+            putExtra(ScreenMirroringService.EXTRA_BITRATE, bitrate)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(startIntent)
+        } else {
+            startService(startIntent)
+        }
+    }
+
+    override fun onScreenStop(reason: String?) {
+        android.util.Log.d("ContinuityService", "Received screen_stop (reason: $reason)")
+        val stopIntent = Intent(this, ScreenMirroringService::class.java).apply {
+            action = ScreenMirroringService.ACTION_STOP
+        }
+        startService(stopIntent)
+    }
+
+    override fun onRemoteInput(action: String, x: Double, y: Double, button: Int) {
+        ContinuityAccessibilityService.instance?.handleInputEvent(action, x, y, button)
+    }
+
+    override fun onRemoteKey(key: String, keyCode: Int) {
+        ContinuityAccessibilityService.instance?.handleKeyInput(key, keyCode)
+    }
+
+    // MARK: - Milestone 3 Continuity Camera Callbacks
+    override fun onCameraStart(lens: String, quality: String, fps: Int) {
+        android.util.Log.d("ContinuityService", "Received camera_start (lens: $lens, quality: $quality, fps: $fps)")
+        val intent = Intent(this, ContinuityCameraService::class.java).apply {
+            action = ContinuityCameraService.ACTION_START
+            putExtra(ContinuityCameraService.EXTRA_LENS, lens)
+            putExtra(ContinuityCameraService.EXTRA_QUALITY, quality)
+            putExtra(ContinuityCameraService.EXTRA_FPS, fps)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    override fun onCameraStop() {
+        android.util.Log.d("ContinuityService", "Received camera_stop")
+        val intent = Intent(this, ContinuityCameraService::class.java).apply {
+            action = ContinuityCameraService.ACTION_STOP
+        }
+        startService(intent)
+    }
+
+    override fun onCameraControl(action: String, lens: String?, zoom: Double?, torch: Boolean?) {
+        ContinuityCameraService.instance?.handleControl(action, lens, zoom, torch)
+    }
+
     private fun showTransferNotification(fileId: String, filename: String, percentage: Double, completed: Boolean, file: File? = null) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         val builder = NotificationCompat.Builder(this, CHANNEL_QUICK_DROP)

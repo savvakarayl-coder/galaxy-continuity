@@ -58,6 +58,16 @@ public struct ContinuityMessage: Codable, Equatable {
     public var quality: String?
     public var zoom: Double?
     public var torch: Bool?
+    public var facing: String?
+    public var resolution: String?
+
+    public var effectiveLens: String? {
+        return lens ?? facing
+    }
+
+    public var effectiveQuality: String? {
+        return quality ?? resolution
+    }
 
     public init(
         type: String,
@@ -104,7 +114,9 @@ public struct ContinuityMessage: Codable, Equatable {
         lens: String? = nil,
         quality: String? = nil,
         zoom: Double? = nil,
-        torch: Bool? = nil
+        torch: Bool? = nil,
+        facing: String? = nil,
+        resolution: String? = nil
     ) {
         self.type = type
         self.device = device
@@ -151,5 +163,7 @@ public struct ContinuityMessage: Codable, Equatable {
         self.quality = quality
         self.zoom = zoom
         self.torch = torch
+        self.facing = facing
+        self.resolution = resolution
     }
 }

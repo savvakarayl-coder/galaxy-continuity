@@ -1,10 +1,15 @@
 package com.galaxycontinuity.app
 
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -21,8 +26,45 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.galaxycontinuity.app.service.ContinuityService
+import com.galaxycontinuity.app.service.ScreenMirroringService
 
 class MainActivity : ComponentActivity() {
+
+    // Register ActivityResultLauncher for MediaProjection
+    private val projectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val serviceIntent = Intent(this, ScreenMirroringService::class.java).apply {
+                action = ScreenMirroringService.ACTION_START
+                putExtra(ScreenMirroringService.EXTRA_RESULT_CODE, result.resultCode)
+                putExtra(ScreenMirroringService.EXTRA_RESULT_DATA, result.data)
+                putExtra(ScreenMirroringService.EXTRA_WIDTH, 1080)
+                putExtra(ScreenMirroringService.EXTRA_HEIGHT, 2400)
+                putExtra(ScreenMirroringService.EXTRA_FPS, 30)
+                putExtra(ScreenMirroringService.EXTRA_BITRATE, 4000000)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        }
+    }
+
+    // Function to launch screen capture consent dialog
+    fun requestScreenCapture() {
+        val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+        mpManager?.createScreenCaptureIntent()?.let { projectionLauncher.launch(it) }
+    }
+
+    // Function to open Android Accessibility settings
+    fun openAccessibilitySettings() {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,7 +89,10 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ContinuityScreen()
+                    ContinuityScreen(
+                        onRequestScreenCapture = { requestScreenCapture() },
+                        onOpenAccessibility = { openAccessibilitySettings() }
+                    )
                 }
             }
         }
@@ -56,7 +101,10 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ContinuityScreen() {
+fun ContinuityScreen(
+    onRequestScreenCapture: () -> Unit = {},
+    onOpenAccessibility: () -> Unit = {}
+) {
     var isConnected by remember { mutableStateOf(ContinuityService.activeClient != null) }
     var statusText by remember { mutableStateOf(ContinuityService.lastStatus) }
     var textToSend by remember { mutableStateOf("") }
@@ -211,7 +259,7 @@ fun ContinuityScreen() {
             }
         }
 
-        // Quick Actions
+        // Continuity Controls (Screen Mirroring & Accessibility)
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -233,6 +281,27 @@ fun ContinuityScreen() {
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
+                        onClick = onRequestScreenCapture,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Mirror Screen", fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onOpenAccessibility,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Remote Input", fontSize = 12.sp)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
                         onClick = {
                             ContinuityService.activeClient?.sendNotification(
                                 "Samsung Galaxy",
@@ -244,16 +313,6 @@ fun ContinuityScreen() {
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Test Notify", fontSize = 12.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            // Ping Mac
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Ping Mac", fontSize = 12.sp)
                     }
                 }
             }

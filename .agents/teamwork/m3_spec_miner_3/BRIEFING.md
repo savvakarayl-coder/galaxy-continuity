@@ -1,4 +1,4 @@
-# BRIEFING — 2026-11-07T12:07:00Z
+# BRIEFING — 2026-11-07T14:22:00Z
 
 ## Mission
 Mine specifications, schemas, binary framing, message sequences, error handling (>5000ms stall), input events, and test assertions for Milestone 3 (Screen Mirroring & Continuity Camera).
@@ -19,7 +19,7 @@ Mine specifications, schemas, binary framing, message sequences, error handling 
 
 ## Current Parent
 - Conversation ID: edb875f9-c921-490b-8f47-2beeb22c6414
-- Updated: 2026-11-07T12:07:00Z
+- Updated: 2026-11-07T14:22:00Z
 
 ## Task Summary
 - **What to build**: Comprehensive contract specification and test expectations for Screen Mirroring and Continuity Camera in handoff.md.
@@ -28,7 +28,10 @@ Mine specifications, schemas, binary framing, message sequences, error handling 
 - **Code layout**: /Users/frogs_hyles/.gemini/antigravity/scratch/galaxy-continuity/.agents/teamwork/PROJECT.md
 
 ## Key Decisions Made
-- Initializing spec mining for M3 protocol and E2E test suites.
+- Extracted complete protocol definitions from shared/PROTOCOL.md (§ 4.1, § 4.2, § 5.4, § 5.5, § 6.2).
+- Inspected all relevant tests across tests/e2e/ Tiers 1-4 (T1: test_27..36, T2: test_29..39, T3: test_03, 04, 06, 09, T4: test_02, 03).
+- Verified existing codebase status: mac/Models/ContinuityMessage.swift includes M3 fields; ServerManager.swift has empty binary frame handler; android/ app unit tests verify protocol serialization.
+- Preparing comprehensive 5-component handoff report in handoff.md.
 
 ## Artifact Index
 - /Users/frogs_hyles/.gemini/antigravity/scratch/galaxy-continuity/.agents/teamwork/m3_spec_miner_3/DISPATCH.md — Task assignment and instructions

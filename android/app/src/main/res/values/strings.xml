@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">Galaxy Continuity</string>
+    <string name="accessibility_service_description">Enables remote touch gestures and navigation controls dispatched from your connected Mac during screen mirroring sessions.</string>
+    <string name="screen_mirroring_notification">Streaming phone display to Mac</string>
+    <string name="camera_streaming_notification">Streaming camera video feed to Mac</string>
 </resources>

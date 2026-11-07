@@ -20,14 +20,22 @@ Investigate Android client implementation for Milestone 3 (Screen Mirroring, Rem
 - Updated: not yet
 
 ## Investigation State
-- **Explored paths**: None
-- **Key findings**: Initializing investigation
-- **Unexplored areas**: android/app/src/main/AndroidManifest.xml, services, network, MediaProjection, Camera2, AccessibilityService, unit tests
+- **Explored paths**: `android/app/src/main/AndroidManifest.xml`, `android/app/build.gradle.kts`, `android/app/src/main/java/com/galaxycontinuity/app/service/ContinuityService.kt`, `android/app/src/main/java/com/galaxycontinuity/app/network/WebSocketClient.kt`, `android/app/src/main/java/com/galaxycontinuity/app/MainActivity.kt`, `shared/PROTOCOL.md`, `mac/Sources/GalaxyContinuityKit/`, `tests/e2e/test_tier*.py`.
+- **Key findings**:
+  1. `AndroidManifest.xml` lacks permissions `FOREGROUND_SERVICE_MEDIA_PROJECTION`, `FOREGROUND_SERVICE_CAMERA`, `CAMERA`, and service declarations for `ScreenMirroringService`, `ContinuityCameraService`, and `ContinuityAccessibilityService`.
+  2. Protocol requires 5-byte binary packet framing: `[0x01/0x02][UInt32 Big-Endian length][payload]`. Screen mirroring uses `0x01` (H.264 NAL / JPEG), Camera uses `0x02` (JPEG payload starting with `0xFF 0xD8`).
+  3. Remote input injection uses `AccessibilityService.dispatchGesture` for touch (`down`, `move`, `up`, `scroll` with normalized coordinates `0.0`..`1.0` clamped defensively) and `performGlobalAction` for navigation keys (`BACK`, `HOME`, `RECENTS`, `POWER`, etc.).
+  4. Android 14 (API 34) mandates foreground service with `mediaProjection` started BEFORE `MediaProjectionManager.getMediaProjection(resultCode, data)` is called.
+- **Unexplored areas**: None. Entire Android stack for M3 is thoroughly mapped.
 
 ## Key Decisions Made
-- Initialized briefing and progress tracking.
+- Architected `StreamPacket` helper for 5-byte packet packing/unpacking to facilitate standalone JVM unit testing.
+- Decoupled `RemoteInputMapper` from Android OS `AccessibilityService` runtime to allow pure unit testing of coordinate clamping and key mapping.
+- Structured `ScreenMirroringService` and `ContinuityCameraService` with clean foreground service lifecycles, notification channels, and error handling.
+- Specified 3 comprehensive unit test suites in `android/app/src/test/java/com/galaxycontinuity/app/` (`StreamPacketTest`, `ScreenMirroringTest`, `ContinuityCameraTest`).
 
 ## Artifact Index
 - DISPATCH.md — Task assignment and instructions
 - BRIEFING.md — Persistent working memory and state
 - progress.md — Liveness heartbeat and task progress
+- handoff.md — Complete 5-component handoff report with drop-in blueprints

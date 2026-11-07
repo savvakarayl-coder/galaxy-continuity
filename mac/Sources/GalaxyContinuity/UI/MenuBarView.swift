@@ -127,6 +127,49 @@ public struct MenuBarView: View {
 
             Divider()
 
+            // Screen Mirroring & Continuity Camera Card
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Continuity Features")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                HStack(spacing: 8) {
+                    Button(action: {
+                        ScreenMirroringWindowController.shared.show()
+                        if !state.isScreenMirroringActive {
+                            ScreenMirroringService.shared.startMirroring()
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "rectangle.inset.filled.and.cursorarrow")
+                            Text("Screen Mirror")
+                                .font(.system(size: 11))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button(action: {
+                        CameraPreviewWindowController.shared.show()
+                        if !state.isCameraActive {
+                            ContinuityCameraService.shared.startCamera()
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "camera")
+                            Text("Camera")
+                                .font(.system(size: 11))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            Divider()
+
             // Quick Actions Bar
             HStack(spacing: 8) {
                 Button(action: {
