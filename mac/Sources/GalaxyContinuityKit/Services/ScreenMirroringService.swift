@@ -40,6 +40,9 @@ public final class ScreenMirroringService: @unchecked Sendable {
     }
 
     public func startMirroring(width: Int = 720, height: Int = 1600, fps: Int = 30, bitrate: Int = 3000000) {
+        // Automatically wake up phone and unlock keyguard so mirror stream displays active screen
+        wakeUpAndUnlockDevice()
+
         let msg = ContinuityMessage(
             type: "screen_start",
             width: width,
@@ -165,6 +168,17 @@ public final class ScreenMirroringService: @unchecked Sendable {
         sendScrollEvent(x: x, y: y, dx: dx, dy: dy)
     }
 
+    public func wakeUpAndUnlockDevice() {
+        sendKeyInput(key: "WAKEUP", keyCode: 224)
+        guard let adb = adbPath else { return }
+        DispatchQueue.global(qos: .userInteractive).async {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: adb)
+            proc.arguments = ["shell", "input keyevent 224 && input swipe 540 1800 540 400 200"]
+            try? proc.run()
+        }
+    }
+
     public func sendKeyInput(key: String, keyCode: Int? = nil) {
         let msg = ContinuityMessage(
             type: "input_key",
@@ -179,6 +193,15 @@ public final class ScreenMirroringService: @unchecked Sendable {
         else if keyUpper == "RECENTS" { dispatchAdbInput(args: ["keyevent", "187"]) }
         else if keyUpper == "NOTIFICATIONS" { dispatchAdbInput(args: ["keyevent", "83"]) }
         else if keyUpper == "POWER" || keyUpper == "LOCK" { dispatchAdbInput(args: ["keyevent", "26"]) }
+        else if keyUpper == "WAKEUP" || keyCode == 224 {
+            guard let adb = adbPath else { return }
+            DispatchQueue.global(qos: .userInteractive).async {
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: adb)
+                proc.arguments = ["shell", "input keyevent 224 && input swipe 540 1800 540 400 200"]
+                try? proc.run()
+            }
+        }
         else if let code = keyCode, code > 0 { dispatchAdbInput(args: ["keyevent", "\(code)"]) }
     }
 

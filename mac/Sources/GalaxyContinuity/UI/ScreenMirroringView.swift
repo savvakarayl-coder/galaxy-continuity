@@ -235,6 +235,16 @@ public struct ScreenMirroringView: View {
             .buttonStyle(.plain)
             .help("Lock / Power")
 
+            Button(action: {
+                ScreenMirroringService.shared.wakeUpAndUnlockDevice()
+            }) {
+                Image(systemName: "sun.max.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.yellow.opacity(0.9))
+            }
+            .buttonStyle(.plain)
+            .help("Wake Up & Unlock Device")
+
             Divider()
                 .frame(height: 12)
                 .background(Color.white.opacity(0.2))

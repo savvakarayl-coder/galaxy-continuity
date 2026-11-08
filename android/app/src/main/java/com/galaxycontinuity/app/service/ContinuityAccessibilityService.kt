@@ -9,6 +9,9 @@ import android.content.Context
 import android.graphics.Path
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.KeyEvent
@@ -251,6 +254,12 @@ class ContinuityAccessibilityService : AccessibilityService() {
     fun handleKeyInput(key: String, keyCode: Int) {
         val keyUpper = key.uppercase().trim()
 
+        // 0. Check WAKEUP / UNLOCK action
+        if (keyUpper == "WAKEUP" || keyCode == 224) {
+            wakeUpAndUnlock()
+            return
+        }
+
         // 1. Check Global Actions (BACK, HOME, RECENTS, NOTIFICATIONS, QUICK_SETTINGS, POWER/LOCK)
         val globalAction = RemoteInputMapper.mapToGlobalAction(key, keyCode)
         if (globalAction != null) {
@@ -405,5 +414,49 @@ class ContinuityAccessibilityService : AccessibilityService() {
         val gesture = GestureDescription.Builder().addStroke(gestureStroke).build()
         val dispatched = dispatchGesture(gesture, null, null)
         Log.d(TAG, "Dispatched scroll gesture (${stroke.startX},${stroke.startY} -> ${stroke.endX},${stroke.endY}, ${stroke.durationMs}ms): result=$dispatched")
+    }
+
+    /**
+     * Wakes up the screen if asleep/dozing and performs an upward swipe gesture to dismiss the lock screen.
+     */
+    fun wakeUpAndUnlock() {
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            val wakeLock = powerManager?.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                "galaxycontinuity:RemoteWakeup"
+            )
+            wakeLock?.acquire(3000L) // Hold wake lock for 3 seconds
+            Log.d(TAG, "Acquired remote wakeup SCREEN_BRIGHT_WAKE_LOCK")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error acquiring wake lock: ${e.message}")
+        }
+
+        // Perform unlock swipe gesture after short delay to let display turn on
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                val metrics = resources.displayMetrics
+                val midX = (metrics.widthPixels / 2).toFloat()
+                val startY = (metrics.heightPixels * 0.75f)
+                val endY = (metrics.heightPixels * 0.15f)
+
+                val path = Path().apply {
+                    moveTo(midX, startY)
+                    lineTo(midX, endY)
+                }
+                val stroke = GestureDescription.StrokeDescription(path, 0, 200L)
+                val gesture = GestureDescription.Builder().addStroke(stroke).build()
+                dispatchGesture(gesture, object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        Log.d(TAG, "Remote unlock swipe gesture completed successfully")
+                    }
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        Log.w(TAG, "Remote unlock swipe gesture cancelled")
+                    }
+                }, null)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to dispatch unlock swipe gesture", e)
+            }
+        }, 300L)
     }
 }
