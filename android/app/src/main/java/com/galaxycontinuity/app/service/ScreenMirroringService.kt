@@ -64,6 +64,12 @@ class ScreenMirroringService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        val notification = buildNotification("Initializing Screen Mirroring...")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
