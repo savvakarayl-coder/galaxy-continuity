@@ -47,6 +47,79 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
     private var clipboardSync: ClipboardSync? = null
     private val fileTransferClient = FileTransferClient()
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var reconnectionJob: Job? = null
+    private var reconnectAttempt = 0
+
+    private fun saveLastKnownHost(host: String, port: Int) {
+        if (host.isEmpty() || host == "127.0.0.1") return
+        try {
+            getSharedPreferences("galaxy_continuity_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("last_known_host", host)
+                .putInt("last_known_port", port)
+                .apply()
+            android.util.Log.d("ContinuityService", "Persisted last-known Wi-Fi host: $host:$port")
+        } catch (e: Exception) {
+            android.util.Log.w("ContinuityService", "Failed to persist last-known host: ${e.message}")
+        }
+    }
+
+    private fun getLastKnownHost(): String? {
+        return try {
+            getSharedPreferences("galaxy_continuity_prefs", Context.MODE_PRIVATE)
+                .getString("last_known_host", null)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun getLastKnownPort(): Int {
+        return try {
+            getSharedPreferences("galaxy_continuity_prefs", Context.MODE_PRIVATE)
+                .getInt("last_known_port", 8765)
+        } catch (e: Exception) {
+            8765
+        }
+    }
+
+    private fun startReconnectionLoop() {
+        if (reconnectionJob?.isActive == true) return
+        reconnectionJob = serviceScope.launch {
+            while (isRunning && !isSocketConnected.value) {
+                reconnectAttempt++
+
+                // Probe 1: USB Loopback (via adb reverse)
+                android.util.Log.d("ContinuityService", "Reconnection attempt #$reconnectAttempt: probing USB loopback 127.0.0.1:8765...")
+                updateNotification("Connecting to Mac (USB/Wi-Fi)...")
+                try {
+                    webSocketClient?.connect("127.0.0.1", 8765)
+                } catch (e: Exception) {
+                    android.util.Log.d("ContinuityService", "USB loopback connect error: ${e.message}")
+                }
+
+                kotlinx.coroutines.delay(1200L)
+                if (!isRunning || isSocketConnected.value) break
+
+                // Probe 2: Cached last-known Wi-Fi host
+                val cachedHost = getLastKnownHost()
+                val cachedPort = getLastKnownPort()
+                if (!cachedHost.isNullOrEmpty() && cachedHost != "127.0.0.1") {
+                    android.util.Log.d("ContinuityService", "Reconnection attempt #$reconnectAttempt: probing cached Wi-Fi host $cachedHost:$cachedPort...")
+                    try {
+                        webSocketClient?.connect(cachedHost, cachedPort)
+                    } catch (e: Exception) {
+                        android.util.Log.d("ContinuityService", "Cached host connect error: ${e.message}")
+                    }
+                    kotlinx.coroutines.delay(1200L)
+                    if (!isRunning || isSocketConnected.value) break
+                }
+
+                // Probe 3: Trigger mDNS scan
+                nsdDiscovery?.startDiscovery()
+                kotlinx.coroutines.delay(1500L)
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -75,16 +148,13 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
             lastStatus = "Connecting to $name..."
             connectionStatus.value = "Connecting to $name..."
             updateNotification("Connecting to $name...")
+            saveLastKnownHost(host, port)
             webSocketClient?.connect(host, port)
         }
         nsdDiscovery?.startDiscovery()
 
-        // Proactively probe local USB loopback (via adb reverse) and default Mac IP
-        serviceScope.launch {
-            try {
-                webSocketClient?.connect("127.0.0.1", 8765)
-            } catch (_: Exception) {}
-        }
+        // Kick off background reconnection loop immediately (attempt 0 runs with 0ms delay)
+        startReconnectionLoop()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -102,6 +172,8 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         activeClient = null
         isSocketConnected.value = false
         connectionStatus.value = "Disconnected"
+        reconnectionJob?.cancel()
+        reconnectionJob = null
         serviceScope.cancel()
         nsdDiscovery?.stopDiscovery()
         clipboardSync?.stop()
@@ -112,6 +184,14 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
 
     // WebSocket callbacks
     override fun onConnected(macName: String) {
+        reconnectionJob?.cancel()
+        reconnectionJob = null
+        reconnectAttempt = 0
+        val host = webSocketClient?.currentHost ?: ""
+        val port = webSocketClient?.currentPort ?: 8765
+        if (host.isNotEmpty() && host != "127.0.0.1") {
+            saveLastKnownHost(host, port)
+        }
         lastStatus = "Connected to $macName"
         connectionStatus.value = "Connected to $macName"
         isSocketConnected.value = true
@@ -124,6 +204,7 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         isSocketConnected.value = false
         updateNotification("Disconnected. Searching for Mac...")
         nsdDiscovery?.startDiscovery()
+        startReconnectionLoop()
     }
 
     override fun onClipboardReceived(content: String, contentType: String, hash: String?) {
@@ -240,6 +321,19 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
     override fun onNotificationReply(id: String, packageName: String, replyText: String) {
         android.util.Log.d("ContinuityService", "Received notification_reply for $id ($packageName): $replyText")
         NotificationForwarderService.replyToNotification(id, packageName, replyText)
+    }
+
+    override fun onRemoteText(text: String) {
+        ContinuityAccessibilityService.instance?.handleTextInput(text)
+    }
+
+    override fun onRemoteScroll(x: Double, y: Double, dx: Double, dy: Double) {
+        ContinuityAccessibilityService.instance?.handleScroll(x, y, dx, dy)
+    }
+
+    override fun onNotificationOpen(id: String, packageName: String) {
+        android.util.Log.d("ContinuityService", "Received notification_open for id=$id pkg=$packageName")
+        NotificationForwarderService.openNotification(this, id, packageName)
     }
 
     private fun showTransferNotification(fileId: String, filename: String, percentage: Double, completed: Boolean, file: File? = null) {

@@ -147,4 +147,148 @@ class ScreenMirroringUnitTest {
         )
         assertEquals(20L, quickStroke.durationMs)
     }
+
+    @Test
+    fun testResolveScrollStrokeDownwardNatural() {
+        // macOS natural scrolling downward produces negative dy (swiping up)
+        val stroke = RemoteInputMapper.resolveScrollStroke(
+            normalizedX = 0.5,
+            normalizedY = 0.5,
+            dx = 0.0,
+            dy = -40.0,
+            displayWidth = 1080,
+            displayHeight = 2400,
+            scaleMultiplier = 3.0f
+        )
+
+        assertEquals(540f, stroke.startX, 0.001f)
+        assertEquals(1200f, stroke.startY, 0.001f)
+        assertEquals(540f, stroke.endX, 0.001f)
+        // endY should be 1200 - 120 = 1080
+        assertEquals(1080f, stroke.endY, 0.001f)
+        assertTrue(stroke.endY < stroke.startY)
+        assertTrue(stroke.durationMs in 60L..150L)
+    }
+
+    @Test
+    fun testResolveScrollStrokeUpwardNatural() {
+        val stroke = RemoteInputMapper.resolveScrollStroke(
+            normalizedX = 0.5,
+            normalizedY = 0.5,
+            dx = 0.0,
+            dy = 50.0,
+            displayWidth = 1080,
+            displayHeight = 2400,
+            scaleMultiplier = 3.0f
+        )
+
+        assertEquals(540f, stroke.startX, 0.001f)
+        assertEquals(1200f, stroke.startY, 0.001f)
+        assertEquals(540f, stroke.endX, 0.001f)
+        // endY should be 1200 + 150 = 1350
+        assertEquals(1350f, stroke.endY, 0.001f)
+        assertTrue(stroke.endY > stroke.startY)
+    }
+
+    @Test
+    fun testResolveScrollStrokeDisplayBoundaryClamping() {
+        // Extreme negative delta clamped to top of screen (0)
+        val stroke = RemoteInputMapper.resolveScrollStroke(
+            normalizedX = 0.5,
+            normalizedY = 0.05,
+            dx = 0.0,
+            dy = -200.0,
+            displayWidth = 1080,
+            displayHeight = 2400,
+            scaleMultiplier = 3.0f
+        )
+
+        assertEquals(0f, stroke.endY, 0.001f)
+    }
+
+    @Test
+    fun testCalculateScrollStrokeDownward() {
+        val width = 1080
+        val height = 2400
+        val stroke = RemoteInputMapper.calculateScrollStroke(
+            rawX = 0.5,
+            rawY = 0.5,
+            dx = 0.0,
+            dy = 50.0,
+            displayWidth = width,
+            displayHeight = height,
+            scaleFactor = 3.0f
+        )
+
+        assertNotNull(stroke)
+        assertEquals(540f, stroke!!.startX, 0.01f)
+        assertEquals(1200f, stroke.startY, 0.01f)
+        assertEquals(540f, stroke.endX, 0.01f)
+        assertEquals(1350f, stroke.endY, 0.01f)
+        assertTrue("Duration must be bounded between 40ms and 250ms", stroke.durationMs in 40L..250L)
+    }
+
+    @Test
+    fun testCalculateScrollStrokeUpward() {
+        val width = 1080
+        val height = 2400
+        val stroke = RemoteInputMapper.calculateScrollStroke(
+            rawX = 0.5,
+            rawY = 0.5,
+            dx = 0.0,
+            dy = -80.0,
+            displayWidth = width,
+            displayHeight = height,
+            scaleFactor = 3.0f
+        )
+
+        assertNotNull(stroke)
+        assertEquals(540f, stroke!!.startX, 0.01f)
+        assertEquals(1200f, stroke.startY, 0.01f)
+        assertEquals(540f, stroke.endX, 0.01f)
+        assertEquals(960f, stroke.endY, 0.01f)
+    }
+
+    @Test
+    fun testCalculateScrollStrokeClampsToScreenBounds() {
+        val width = 1080
+        val height = 2400
+        val stroke = RemoteInputMapper.calculateScrollStroke(
+            rawX = 0.5,
+            rawY = 0.5,
+            dx = 0.0,
+            dy = -2000.0,
+            displayWidth = width,
+            displayHeight = height,
+            scaleFactor = 3.0f
+        )
+
+        assertNotNull(stroke)
+        assertEquals(0f, stroke!!.endY, 0.01f)
+    }
+
+    @Test
+    fun testCalculateScrollStrokeDeadbandSuppression() {
+        val stroke = RemoteInputMapper.calculateScrollStroke(
+            rawX = 0.5,
+            rawY = 0.5,
+            dx = 0.1,
+            dy = 0.2,
+            displayWidth = 1080,
+            displayHeight = 2400
+        )
+        assertNull("Microscopic trackpad jitter under deadband threshold must return null", stroke)
+    }
+
+    @Test
+    fun testEditingKeycodeMapping() {
+        assertEquals(KeyEvent.KEYCODE_DEL, RemoteInputMapper.mapToKeyCode("DEL"))
+        assertEquals(KeyEvent.KEYCODE_DEL, RemoteInputMapper.mapToKeyCode("BACKSPACE"))
+        assertEquals(KeyEvent.KEYCODE_ENTER, RemoteInputMapper.mapToKeyCode("ENTER"))
+        assertEquals(KeyEvent.KEYCODE_TAB, RemoteInputMapper.mapToKeyCode("TAB"))
+        assertEquals(KeyEvent.KEYCODE_ESCAPE, RemoteInputMapper.mapToKeyCode("ESCAPE"))
+        assertEquals(KeyEvent.KEYCODE_SPACE, RemoteInputMapper.mapToKeyCode("SPACE"))
+        assertEquals(KeyEvent.KEYCODE_DPAD_UP, RemoteInputMapper.mapToKeyCode("DPAD_UP"))
+        assertEquals(KeyEvent.KEYCODE_DPAD_DOWN, RemoteInputMapper.mapToKeyCode("DPAD_DOWN"))
+    }
 }

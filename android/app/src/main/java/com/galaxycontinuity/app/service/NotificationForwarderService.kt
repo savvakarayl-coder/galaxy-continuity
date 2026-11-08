@@ -2,6 +2,7 @@ package com.galaxycontinuity.app.service
 
 import android.app.PendingIntent
 import android.app.RemoteInput
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
@@ -23,6 +24,9 @@ class NotificationForwarderService : NotificationListenerService() {
             private set
 
         private val replyCache = ConcurrentHashMap<String, ReplyActionHolder>()
+        private val contentIntentCache = ConcurrentHashMap<String, PendingIntent>()
+        private val packageCache = ConcurrentHashMap<String, String>()
+        private val testContentIntentCallbacks = ConcurrentHashMap<String, () -> Unit>()
 
         fun replyToNotification(id: String, packageName: String, replyText: String): Boolean {
             val service = instance
@@ -44,6 +48,74 @@ class NotificationForwarderService : NotificationListenerService() {
             }
         }
 
+        fun openNotification(id: String, packageName: String): Boolean {
+            val testCb = testContentIntentCallbacks[id]
+            if (testCb != null) {
+                testCb.invoke()
+                return true
+            }
+            val service = instance
+            if (service != null) {
+                return service.open(id, packageName)
+            }
+            val pendingIntent = contentIntentCache[id]
+            if (pendingIntent != null) {
+                return try {
+                    pendingIntent.send()
+                    Log.d("NotifForwarder", "Executed cached contentIntent for $id ($packageName)")
+                    true
+                } catch (e: Exception) {
+                    Log.e("NotifForwarder", "Fallback contentIntent send failed: ${e.message}")
+                    false
+                }
+            }
+            return false
+        }
+
+        fun openNotification(context: Context, id: String, packageName: String): Boolean {
+            val testCb = testContentIntentCallbacks[id]
+            if (testCb != null) {
+                testCb.invoke()
+                return true
+            }
+            val service = instance
+            if (service != null) {
+                return service.open(id, packageName)
+            }
+            val pendingIntent = contentIntentCache[id]
+            if (pendingIntent != null) {
+                return try {
+                    pendingIntent.send()
+                    Log.d("NotifForwarder", "Executed cached contentIntent for $id ($packageName)")
+                    true
+                } catch (e: Exception) {
+                    Log.w("NotifForwarder", "Fallback contentIntent send failed, launching package: ${e.message}")
+                    launchPackage(context, packageName)
+                }
+            }
+            return launchPackage(context, packageName)
+        }
+
+        private fun launchPackage(context: Context, packageName: String): Boolean {
+            if (packageName.isEmpty()) return false
+            return try {
+                val pm = context.packageManager
+                val intent = pm.getLaunchIntentForPackage(packageName)
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                    context.startActivity(intent)
+                    Log.d("NotifForwarder", "Successfully launched package activity for $packageName")
+                    true
+                } else {
+                    Log.w("NotifForwarder", "No launch intent found for package $packageName")
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e("NotifForwarder", "Failed to launch package $packageName: ${e.message}", e)
+                false
+            }
+        }
+
         fun registerTestReplyAction(id: String, holder: ReplyActionHolder) {
             replyCache[id] = holder
         }
@@ -52,8 +124,34 @@ class NotificationForwarderService : NotificationListenerService() {
             return replyCache.containsKey(id)
         }
 
+        fun registerTestContentIntent(id: String, pendingIntent: PendingIntent) {
+            contentIntentCache[id] = pendingIntent
+        }
+
+        fun registerTestContentIntent(id: String, callback: () -> Unit) {
+            testContentIntentCallbacks[id] = callback
+        }
+
+        fun hasContentIntent(id: String): Boolean {
+            return contentIntentCache.containsKey(id) || testContentIntentCallbacks.containsKey(id)
+        }
+
+        fun evictFromCache(id: String) {
+            replyCache.remove(id)
+            contentIntentCache.remove(id)
+            packageCache.remove(id)
+            testContentIntentCallbacks.remove(id)
+        }
+
         fun clearReplyCache() {
+            clearCaches()
+        }
+
+        fun clearCaches() {
             replyCache.clear()
+            contentIntentCache.clear()
+            packageCache.clear()
+            testContentIntentCallbacks.clear()
         }
     }
 
@@ -102,6 +200,14 @@ class NotificationForwarderService : NotificationListenerService() {
 
         val notifId = sbn.key ?: UUID.randomUUID().toString()
 
+        // Cache contentIntent for notification open action
+        sbn.notification?.contentIntent?.let {
+            contentIntentCache[notifId] = it
+        }
+        if (pkg.isNotEmpty()) {
+            packageCache[notifId] = pkg
+        }
+
         // Inspect notification actions for RemoteInput (quick reply)
         var canReply = false
         val actions = sbn.notification?.actions
@@ -130,7 +236,9 @@ class NotificationForwarderService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
-        sbn?.key?.let { replyCache.remove(it) }
+        sbn?.key?.let {
+            evictFromCache(it)
+        }
     }
 
     fun reply(id: String, packageName: String, replyText: String): Boolean {
@@ -152,5 +260,26 @@ class NotificationForwarderService : NotificationListenerService() {
             Log.e(tag, "Failed to send notification reply: ${e.message}", e)
             false
         }
+    }
+
+    fun open(id: String, packageName: String): Boolean {
+        val testCb = testContentIntentCallbacks[id]
+        if (testCb != null) {
+            testCb.invoke()
+            return true
+        }
+        val pendingIntent = contentIntentCache[id]
+        if (pendingIntent != null) {
+            return try {
+                pendingIntent.send()
+                Log.d(tag, "Fired contentIntent for notification $id ($packageName)")
+                true
+            } catch (e: Exception) {
+                Log.w(tag, "contentIntent.send() failed for $id, falling back to package launch", e)
+                launchPackage(this, packageName)
+            }
+        }
+        val fallbackPkg = if (packageName.isNotEmpty()) packageName else packageCache[id] ?: ""
+        return launchPackage(this, fallbackPkg)
     }
 }

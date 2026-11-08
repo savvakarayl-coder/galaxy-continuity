@@ -36,11 +36,19 @@ class WebSocketClient(
 
         // Milestone 4: Notification Relay & Quick Reply
         fun onNotificationReply(id: String, packageName: String, replyText: String)
+
+        // Milestone M-IT3-1: Keyboard text, trackpad scrolling, notification opening
+        fun onRemoteText(text: String) {}
+        fun onRemoteScroll(x: Double, y: Double, dx: Double, dy: Double) {}
+        fun onNotificationOpen(id: String, packageName: String) {}
     }
 
     private val tag = "GalaxyWS"
     private var client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .connectTimeout(1500, TimeUnit.MILLISECONDS)
+        .pingInterval(5, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private var webSocket: WebSocket? = null
@@ -122,12 +130,29 @@ class WebSocketClient(
                             val x = json.optDouble("x", 0.5)
                             val y = json.optDouble("y", 0.5)
                             val button = json.optInt("button", 0)
-                            mainHandler.post { listener.onRemoteInput(action, x, y, button) }
+                            if (action.lowercase().trim() == "scroll" && (json.has("dx") || json.has("dy"))) {
+                                val dx = json.optDouble("dx", 0.0)
+                                val dy = json.optDouble("dy", 0.0)
+                                mainHandler.post { listener.onRemoteScroll(x, y, dx, dy) }
+                            } else {
+                                mainHandler.post { listener.onRemoteInput(action, x, y, button) }
+                            }
                         }
                         "input_key" -> {
                             val key = json.optString("key", "")
                             val keyCode = json.optInt("keyCode", 0)
                             mainHandler.post { listener.onRemoteKey(key, keyCode) }
+                        }
+                        "input_text" -> {
+                            val remoteText = if (json.has("text")) json.getString("text") else json.optString("content", "")
+                            mainHandler.post { listener.onRemoteText(remoteText) }
+                        }
+                        "input_scroll" -> {
+                            val x = json.optDouble("x", 0.5)
+                            val y = json.optDouble("y", 0.5)
+                            val dx = json.optDouble("dx", 0.0)
+                            val dy = json.optDouble("dy", 0.0)
+                            mainHandler.post { listener.onRemoteScroll(x, y, dx, dy) }
                         }
 
                         // Milestone 3: Continuity Camera
@@ -154,6 +179,11 @@ class WebSocketClient(
                             val pkg = json.optString("packageName")
                             val replyText = json.optString("replyText")
                             mainHandler.post { listener.onNotificationReply(id, pkg, replyText) }
+                        }
+                        "notification_open", "notification_click" -> {
+                            val id = json.optString("id")
+                            val pkg = json.optString("packageName")
+                            mainHandler.post { listener.onNotificationOpen(id, pkg) }
                         }
 
                         else -> {

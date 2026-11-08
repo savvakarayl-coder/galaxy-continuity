@@ -89,6 +89,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private var adbReverseTimer: Timer?
+
     private func setupAdbReverse(port: Int = 8765) {
         let candidates = [
             "/tmp/platform-tools/adb",
@@ -97,15 +99,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             NSHomeDirectory() + "/Library/Android/sdk/platform-tools/adb"
         ]
         guard let adb = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { return }
-        DispatchQueue.global(qos: .utility).async {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: adb)
-            proc.arguments = ["reverse", "tcp:\(port)", "tcp:\(port)"]
-            try? proc.run()
+
+        let performReverse = {
+            DispatchQueue.global(qos: .utility).async {
+                for p in [port, 8766] {
+                    let proc = Process()
+                    proc.executableURL = URL(fileURLWithPath: adb)
+                    proc.arguments = ["reverse", "tcp:\(p)", "tcp:\(p)"]
+                    try? proc.run()
+                }
+            }
+        }
+
+        // Run immediately
+        performReverse()
+
+        // Keep active via periodic daemon check every 3 seconds
+        adbReverseTimer?.invalidate()
+        adbReverseTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            performReverse()
         }
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        adbReverseTimer?.invalidate()
+        adbReverseTimer = nil
         ClipboardSyncService.shared.stopMonitoring()
         BonjourService.shared.stopAdvertising()
         ServerManager.shared.stop()

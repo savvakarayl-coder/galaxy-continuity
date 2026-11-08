@@ -306,4 +306,79 @@ class ProtocolSerializationTest {
         assertEquals("mac", p.getString("source"))
         assertEquals("Finding your Galaxy...", p.getString("message"))
     }
+
+    // MARK: - Milestone M-IT3-1: Remote Text, Scroll, and Notification Open
+
+    @Test
+    fun testInputTextMessageSerialization() {
+        val json = JSONObject().apply {
+            put("type", "input_text")
+            put("text", "Hello Galaxy from Mac")
+            put("source", "mac")
+        }
+
+        val parsed = JSONObject(json.toString())
+        assertEquals("input_text", parsed.getString("type"))
+        assertEquals("Hello Galaxy from Mac", parsed.getString("text"))
+        assertEquals("mac", parsed.optString("source"))
+    }
+
+    @Test
+    fun testInputScrollMessageSerialization() {
+        val json = JSONObject().apply {
+            put("type", "input_scroll")
+            put("x", 0.5234)
+            put("y", 0.7412)
+            put("dx", 0.0)
+            put("dy", -35.0)
+            put("phase", "changed")
+        }
+
+        val parsed = JSONObject(json.toString())
+        assertEquals("input_scroll", parsed.getString("type"))
+        assertEquals(0.5234, parsed.getDouble("x"), 0.0001)
+        assertEquals(0.7412, parsed.getDouble("y"), 0.0001)
+        assertEquals(0.0, parsed.getDouble("dx"), 0.0001)
+        assertEquals(-35.0, parsed.getDouble("dy"), 0.0001)
+        assertEquals("changed", parsed.getString("phase"))
+    }
+
+    @Test
+    fun testNotificationOpenMessageSerialization() {
+        val json = JSONObject().apply {
+            put("type", "notification_open")
+            put("id", "notif-uuid-10492")
+            put("packageName", "org.telegram.messenger")
+        }
+
+        val parsed = JSONObject(json.toString())
+        assertEquals("notification_open", parsed.getString("type"))
+        assertEquals("notif-uuid-10492", parsed.getString("id"))
+        assertEquals("org.telegram.messenger", parsed.getString("packageName"))
+    }
+
+    @Test
+    fun testInputKeyEditingCodes() {
+        val editingKeys = listOf(
+            Pair("DEL", 67),
+            Pair("ENTER", 66),
+            Pair("TAB", 61),
+            Pair("ESCAPE", 111),
+            Pair("SPACE", 62),
+            Pair("DPAD_UP", 19),
+            Pair("DPAD_DOWN", 20)
+        )
+
+        for ((keyName, keyCode) in editingKeys) {
+            val json = JSONObject().apply {
+                put("type", "input_key")
+                put("key", keyName)
+                put("keyCode", keyCode)
+            }
+            val parsed = JSONObject(json.toString())
+            assertEquals("input_key", parsed.getString("type"))
+            assertEquals(keyName, parsed.getString("key"))
+            assertEquals(keyCode, parsed.getInt("keyCode"))
+        }
+    }
 }
