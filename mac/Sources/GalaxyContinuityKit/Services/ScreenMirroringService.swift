@@ -151,9 +151,12 @@ public final class ScreenMirroringService: @unchecked Sendable {
 
         let startX = Int(x * 1080.0)
         let startY = Int(y * 2400.0)
-        let endX = max(50, min(1030, startX - Int(dx * 8.0)))
-        let endY = max(50, min(2350, startY + Int(dy * 8.0)))
-        dispatchAdbInput(args: ["swipe", "\(startX)", "\(startY)", "\(endX)", "\(endY)", "80"])
+        // Highly responsive, natural swipe physics for Trackpad 2-finger scroll
+        // dx > 0 (trackpad fingers move left) -> content scrolls right / page swipes left
+        let endX = max(30, min(1050, startX - Int(dx * 12.0)))
+        let endY = max(30, min(2370, startY + Int(dy * 12.0)))
+        let duration = max(30, min(120, Int(hypot(Double(endX - startX), Double(endY - startY)) / 4.0)))
+        dispatchAdbInput(args: ["swipe", "\(startX)", "\(startY)", "\(endX)", "\(endY)", "\(duration)"])
     }
 
     public func sendKeyInput(key: String, keyCode: Int? = nil) {

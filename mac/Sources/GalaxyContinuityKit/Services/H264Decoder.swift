@@ -112,13 +112,18 @@ public final class H264Decoder: @unchecked Sendable {
 
     private func createDecompressionSession(desc: CMVideoFormatDescription) {
         let destinationAttrs: [CFString: Any] = [
-            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferOpenGLCompatibilityKey: true,
+            kCVPixelBufferMetalCompatibilityKey: true
+        ]
+        let decoderSpec: [CFString: Any] = [
+            kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: true
         ]
         var session: VTDecompressionSession?
         let status = VTDecompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             formatDescription: desc,
-            decoderSpecification: nil,
+            decoderSpecification: decoderSpec as CFDictionary,
             imageBufferAttributes: destinationAttrs as CFDictionary,
             decompressionSessionOut: &session
         )

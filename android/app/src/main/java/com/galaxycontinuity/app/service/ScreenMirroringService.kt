@@ -186,8 +186,11 @@ class ScreenMirroringService : Service() {
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1 second keyframe interval
+            // Low-latency real-time video streaming mode
+            setInteger(MediaFormat.KEY_LATENCY, 0)
+            setInteger(MediaFormat.KEY_PRIORITY, 0) // realtime priority
             // Ensure hardware encoder periodically produces frames even when phone display is static
-            setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000L)
+            setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 50_000L) // 50ms (20fps fallback)
         }
 
         val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)

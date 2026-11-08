@@ -4,6 +4,7 @@ import GalaxyContinuityKit
 
 public struct ScreenMirroringView: View {
     @ObservedObject var state = DeviceState.shared
+    @ObservedObject var windowState = ScreenMirroringWindowState.shared
     @State private var isDragging: Bool = false
     @State private var isHoveringToolbar: Bool = false
 
@@ -251,6 +252,20 @@ public struct ScreenMirroringView: View {
             }
             .buttonStyle(.plain)
             .help(state.isScreenMirroringActive ? "Stop Mirroring" : "Start Mirroring")
+
+            Divider()
+                .frame(height: 12)
+                .background(Color.white.opacity(0.2))
+
+            Button(action: {
+                ScreenMirroringWindowState.shared.togglePinned()
+            }) {
+                Image(systemName: windowState.isPinned ? "pin.fill" : "pin")
+                    .font(.system(size: 13))
+                    .foregroundColor(windowState.isPinned ? .yellow : .white.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .help(windowState.isPinned ? "Unpin Window (Allow Move / Normal Level)" : "Pin Window (Lock in Place & Always on Top)")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
@@ -266,12 +281,31 @@ public struct ScreenMirroringView: View {
     }
 }
 
+public final class ScreenMirroringWindowState: ObservableObject {
+    public static let shared = ScreenMirroringWindowState()
+    @Published public var isPinned: Bool = false
+
+    private init() {}
+
+    public func togglePinned() {
+        isPinned.toggle()
+        ScreenMirroringWindowController.shared.applyPinnedState(isPinned)
+    }
+}
+
 public final class ScreenMirroringWindowController: NSWindowController {
     public static let shared = ScreenMirroringWindowController()
     private var eventMonitor: Any?
     private var lastScrollTime: Date = Date()
     private var accumulatedDx: Double = 0
     private var accumulatedDy: Double = 0
+
+    public func applyPinnedState(_ pinned: Bool) {
+        guard let win = self.window else { return }
+        // When pinned: disable dragging window by background and keep floating above all windows
+        win.isMovableByWindowBackground = !pinned
+        win.level = pinned ? .floating : .normal
+    }
 
     private init() {
         // Compact default window size (260 x 578) with aspect ratio 9:20 (0.45)
@@ -408,8 +442,8 @@ public final class ScreenMirroringWindowController: NSWindowController {
         var dx = Double(event.scrollingDeltaX)
         var dy = Double(event.scrollingDeltaY)
         if event.hasPreciseScrollingDeltas {
-            dx *= 1.5
-            dy *= 1.5
+            dx *= 2.0
+            dy *= 2.0
         }
 
         accumulatedDx += dx
@@ -417,7 +451,8 @@ public final class ScreenMirroringWindowController: NSWindowController {
 
         let now = Date()
         let elapsed = now.timeIntervalSince(lastScrollTime)
-        if elapsed >= 0.05 || abs(accumulatedDx) >= 15 || abs(accumulatedDy) >= 15 {
+        // High responsiveness: trigger at 30ms or 8pt delta for buttery smooth swipes
+        if elapsed >= 0.03 || abs(accumulatedDx) >= 8 || abs(accumulatedDy) >= 8 {
             ScreenMirroringService.shared.sendScrollEvent(
                 x: normX,
                 y: normY,
