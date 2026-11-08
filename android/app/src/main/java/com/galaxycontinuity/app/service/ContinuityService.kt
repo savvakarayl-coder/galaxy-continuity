@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.galaxycontinuity.app.MainActivity
+import com.galaxycontinuity.app.network.BleDiscoveryManager
 import com.galaxycontinuity.app.network.FileTransferClient
 import com.galaxycontinuity.app.network.NsdDiscovery
 import com.galaxycontinuity.app.network.WebSocketClient
@@ -43,6 +44,7 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
     }
 
     private var nsdDiscovery: NsdDiscovery? = null
+    private var bleDiscovery: BleDiscoveryManager? = null
     private var webSocketClient: WebSocketClient? = null
     private var clipboardSync: ClipboardSync? = null
     private val fileTransferClient = FileTransferClient()
@@ -153,6 +155,20 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         }
         nsdDiscovery?.startDiscovery()
 
+        // Proximity detection via Bluetooth Low Energy (Apple-like near discovery)
+        try {
+            bleDiscovery = BleDiscoveryManager(this) { shortId, role, port ->
+                android.util.Log.d("ContinuityService", "BLE proximity beacon detected from Mac: shortId=$shortId, port=$port")
+                if (!isSocketConnected.value) {
+                    val host = getLastKnownHost() ?: "127.0.0.1"
+                    webSocketClient?.connect(host, port)
+                }
+            }
+            bleDiscovery?.startScanning()
+        } catch (e: Exception) {
+            android.util.Log.w("ContinuityService", "BLE discovery initialization skipped: ${e.message}")
+        }
+
         // Kick off background reconnection loop immediately (attempt 0 runs with 0ms delay)
         startReconnectionLoop()
     }
@@ -176,6 +192,7 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         reconnectionJob = null
         serviceScope.cancel()
         nsdDiscovery?.stopDiscovery()
+        bleDiscovery?.stopScanning()
         clipboardSync?.stop()
         webSocketClient?.disconnect()
     }

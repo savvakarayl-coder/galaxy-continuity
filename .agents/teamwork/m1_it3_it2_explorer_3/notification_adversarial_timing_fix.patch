@@ -1,0 +1,15 @@
+--- a/mac/Tests/GalaxyContinuityTests/NotificationContinuityAdversarialTests.swift
++++ b/mac/Tests/GalaxyContinuityTests/NotificationContinuityAdversarialTests.swift
+@@ -38,7 +38,11 @@ struct NotificationContinuityAdversarialTests {
+         }
+ 
+         NotificationService.shared.dispatchNotificationOpen(id: "notif-closed-1", packageName: "com.whatsapp")
+-        try await Task.sleep(nanoseconds: 50_000_000)
++        for _ in 0..<20 {
++            let active = await MainActor.run { DeviceState.shared.isScreenMirroringActive }
++            if active { break }
++            try await Task.sleep(nanoseconds: 50_000_000)
++        }
+ 
+         let isActive = await MainActor.run { DeviceState.shared.isScreenMirroringActive }
+         #expect(isActive == true)

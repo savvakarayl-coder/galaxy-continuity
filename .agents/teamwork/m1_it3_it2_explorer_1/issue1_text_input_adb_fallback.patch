@@ -1,0 +1,161 @@
+--- a/mac/Sources/GalaxyContinuityKit/Services/ServerManager.swift
++++ b/mac/Sources/GalaxyContinuityKit/Services/ServerManager.swift
+@@ -46,6 +46,18 @@
+ 
+     public private(set) var currentPort: Int = 8765
+ 
++    private static let serverQueueKey = DispatchSpecificKey<Void>()
++
++    public var hasActiveClients: Bool {
++        if DispatchQueue.getSpecific(key: Self.serverQueueKey) != nil {
++            return clients.values.contains { $0.isWebSocket }
++        } else {
++            return serverQueue.sync {
++                clients.values.contains { $0.isWebSocket }
++            }
++        }
++    }
++
+     public var downloadsDirectory: URL {
+         let fm = FileManager.default
+         let downloads = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+@@ -60,7 +72,9 @@
+         return dir
+     }
+ 
+-    private init() {}
++    private init() {
++        serverQueue.setSpecific(key: Self.serverQueueKey, value: ())
++    }
+ 
+     public func start(port: Int = 8765) {
+         stop()
+--- a/mac/Sources/GalaxyContinuityKit/Services/ScreenMirroringService.swift
++++ b/mac/Sources/GalaxyContinuityKit/Services/ScreenMirroringService.swift
+@@ -119,21 +119,95 @@
+         }
+     }
+ 
++    public func sendTextInput(text: String) {
++        let msg = ContinuityMessage(type: "input_text", text: text)
++        ServerManager.shared.broadcastMessage(msg)
++
++        // Only dispatch ADB fallback when WebSocket is NOT connected to prevent duplicate text input
++        guard !ServerManager.shared.hasActiveClients else { return }
++
++        // Only dispatch ADB fallback if text is pure ASCII without newlines to prevent Android OS NullPointerException
++        guard !text.isEmpty, text.allSatisfy({ $0.isASCII && !$0.isNewline }) else { return }
++
++        // ADB fast-path: escape shell metacharacters, single/double quotes, and replace spaces with %s
++        var escaped = ""
++        escaped.reserveCapacity(text.count * 2)
++        for char in text {
++            switch char {
++            case " ":
++                escaped.append("%s")
++            case "\\", "'", "\"", "$", "`", "&", ";", "(", ")", "|", "<", ">", "*", "?", "[", "]", "{", "}", "~", "!", "#":
++                escaped.append("\\")
++                escaped.append(char)
++            default:
++                escaped.append(char)
++            }
++        }
++        if !escaped.isEmpty {
++            dispatchAdbInput(args: ["text", escaped])
++        }
++    }
++
++    public func sendScrollEvent(x: Double, y: Double, dx: Double, dy: Double) {
++        let clampedX = max(0.0, min(1.0, x))
++        let clampedY = max(0.0, min(1.0, y))
++        let msg = ContinuityMessage(
++            type: "input_scroll",
++            action: "scroll",
++            x: clampedX,
++            y: clampedY,
++            dx: dx,
++            dy: dy
++        )
++        ServerManager.shared.broadcastMessage(msg)
++
++        // ADB fast-path touch swipe fallback (only when WebSocket is NOT connected)
++        guard !ServerManager.shared.hasActiveClients else { return }
++        let startPx = Int(clampedX * 1080.0)
++        let startPy = Int(clampedY * 2400.0)
++        let endPx = max(0, min(1080, startPx - Int(dx * 4.0)))
++        let endPy = max(0, min(2400, startPy - Int(dy * 4.0)))
++        if abs(dx) > 1 || abs(dy) > 1 {
++            dispatchAdbInput(args: ["swipe", "\(startPx)", "\(startPy)", "\(endPx)", "\(endPy)", "100"])
++        }
++    }
++
++    public func sendScrollInput(x: Double, y: Double, dx: Double, dy: Double) {
++        sendScrollEvent(x: x, y: y, dx: dx, dy: dy)
++    }
++
+     public func sendKeyInput(key: String, keyCode: Int? = nil) {
++        var resolvedCode = keyCode
++        let keyUpper = key.uppercased()
++        if resolvedCode == nil {
++            if keyUpper == "BACK" { resolvedCode = 4 }
++            else if keyUpper == "HOME" { resolvedCode = 3 }
++            else if keyUpper == "RECENTS" { resolvedCode = 187 }
++            else if keyUpper == "NOTIFICATIONS" { resolvedCode = 83 }
++            else if keyUpper == "POWER" || keyUpper == "LOCK" { resolvedCode = 26 }
++            else if keyUpper == "BACKSPACE" || keyUpper == "DEL" { resolvedCode = 67 }
++            else if keyUpper == "ENTER" || keyUpper == "RETURN" { resolvedCode = 66 }
++            else if keyUpper == "TAB" { resolvedCode = 61 }
++            else if keyUpper == "ESCAPE" || keyUpper == "ESC" { resolvedCode = 111 }
++            else if keyUpper == "SPACE" { resolvedCode = 62 }
++            else if keyUpper == "DPAD_UP" || keyUpper == "UP" { resolvedCode = 19 }
++            else if keyUpper == "DPAD_DOWN" || keyUpper == "DOWN" { resolvedCode = 20 }
++            else if keyUpper == "DPAD_LEFT" || keyUpper == "LEFT" { resolvedCode = 21 }
++            else if keyUpper == "DPAD_RIGHT" || keyUpper == "RIGHT" { resolvedCode = 22 }
++        }
++
+         let msg = ContinuityMessage(
+             type: "input_key",
+             key: key,
+-            keyCode: keyCode
+-        )
+-        ServerManager.shared.broadcastMessage(msg)
+-
+-        let keyUpper = key.uppercased()
+-        if keyUpper == "BACK" { dispatchAdbInput(args: ["keyevent", "4"]) }
+-        else if keyUpper == "HOME" { dispatchAdbInput(args: ["keyevent", "3"]) }
+-        else if keyUpper == "RECENTS" { dispatchAdbInput(args: ["keyevent", "187"]) }
+-        else if keyUpper == "NOTIFICATIONS" { dispatchAdbInput(args: ["keyevent", "83"]) }
+-        else if keyUpper == "POWER" || keyUpper == "LOCK" { dispatchAdbInput(args: ["keyevent", "26"]) }
+-        else if let code = keyCode, code > 0 { dispatchAdbInput(args: ["keyevent", "\(code)"]) }
++            keyCode: resolvedCode
++        )
++        ServerManager.shared.broadcastMessage(msg)
++
++        // Only dispatch ADB fallback when WebSocket is NOT connected to prevent duplicate key injection
++        guard !ServerManager.shared.hasActiveClients else { return }
++        if let code = resolvedCode, code > 0 {
++            dispatchAdbInput(args: ["keyevent", "\(code)"])
++        }
+     }
+ 
+     public func handleIncomingFrame(_ frameData: Data) {
+@@ -191,6 +265,8 @@
+         print("[ScreenMirroringService] Inbound input key: key=\(message.key ?? "") keyCode=\(message.keyCode ?? 0)")
+     }
+ 
++    public var stallTimeout: TimeInterval = 5.0
++
+     private func startStallWatchdog() {
+         stopStallWatchdog()
+         lastFrameReceivedDate = Date()
+@@ -198,8 +274,8 @@
+         timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+         timer.setEventHandler { [weak self] in
+             guard let self = self, let last = self.lastFrameReceivedDate else { return }
+-            if Date().timeIntervalSince(last) > 30.0 {
+-                print("[ScreenMirroringService] Stream stalled (>30s), issuing screen_stop")
++            if Date().timeIntervalSince(last) >= self.stallTimeout {
++                print("[ScreenMirroringService] Stream stalled (>=\(Int(self.stallTimeout))s), issuing screen_stop")
+                 self.stopMirroring(reason: "stream_stalled")
+             }
+         }

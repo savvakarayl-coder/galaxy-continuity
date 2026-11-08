@@ -88,21 +88,21 @@ Orchestrate the complete 1:1 Apple Continuity replacement between macOS and Sams
 | worker_m3_it2 | teamwork_worker | M3-It2: Screen Mirroring & Camera Remediations | completed | 7ae19b4b-7b86-4bbb-869f-0ee32d1573ef |
 | reviewer_m3_it2_1 | teamwork_reviewer | M3-It2: macOS Host & VideoToolbox Review | completed (APPROVE) | 12bfd8fe-9433-423d-8fa7-171ff8da7dd8 |
 | reviewer_m3_it2_2 | teamwork_reviewer | M3-It2: Android Client & Gesture Safety Review | completed (APPROVE) | eab434fa-7096-4b00-b3d3-a72fbdca5ce9 |
-| challenger_m3_it2_1 | teamwork_challenger | M3-It2: Screen Mirroring Adversarial Challenge | in-progress | 5aa5a67b-c826-4556-965e-1d006953cd1d |
+| challenger_m3_it2_1 | teamwork_challenger | M3-It2: Screen Mirroring Adversarial Challenge | completed (APPROVE) | 5aa5a67b-c826-4556-965e-1d006953cd1d |
 | challenger_m3_it2_2 | teamwork_challenger | M3-It2: Camera & MJPEG Adversarial Challenge | in-progress | 8add451e-ded0-4ab7-b042-9d6f1e90db5d |
 | auditor_m3_it2_1 | teamwork_auditor | M3-It2: Forensic Integrity Audit | completed (CLEAN) | 972d7769-990b-4c7d-9787-9db7db0f54d1 |
 
 ## Succession Status
 - Succession required: yes (upon completion of active gate subagents)
 - Spawn count: 18 / 16 (in M3 cycle)
-- Pending subagents: 5aa5a67b-c826-4556-965e-1d006953cd1d, 8add451e-ded0-4ab7-b042-9d6f1e90db5d
+- Pending subagents: 8add451e-ded0-4ab7-b042-9d6f1e90db5d
 
 - Predecessor: none
 - Successor: not yet spawned
 
 ## Active Timers
 - Heartbeat cron: edb875f9-c921-490b-8f47-2beeb22c6414/task-58 (recurring every 10 min)
-- Safety timer: edb875f9-c921-490b-8f47-2beeb22c6414/task-661 (600s)
+- Safety timer: edb875f9-c921-490b-8f47-2beeb22c6414/task-725 (600s)
 - On succession: kill all timers before spawning successor
 - On context truncation: handle timers as step 4 of the State Recovery section of your prompt says
 

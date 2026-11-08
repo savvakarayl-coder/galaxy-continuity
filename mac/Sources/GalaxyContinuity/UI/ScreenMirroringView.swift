@@ -7,157 +7,162 @@ public struct ScreenMirroringView: View {
     @State private var isDragging: Bool = false
     @State private var isHoveringToolbar: Bool = false
 
-    private let screenWidth: CGFloat = 300
-    private let screenHeight: CGFloat = 667
-    private let chassisPadding: CGFloat = 10
-    private let outerRadius: CGFloat = 36
-    private let innerRadius: CGFloat = 26
+    private let chassisPadding: CGFloat = 8
+    private let outerRadius: CGFloat = 32
+    private let innerRadius: CGFloat = 22
 
     public init() {}
 
     public var body: some View {
-        ZStack {
-            // Dark titanium smartphone chassis outer frame
-            RoundedRectangle(cornerRadius: outerRadius, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(white: 0.18),
-                            Color(white: 0.12),
-                            Color(white: 0.08)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: outerRadius, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color(white: 0.35),
-                                    Color(white: 0.20),
-                                    Color(white: 0.12)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1.5
+        GeometryReader { geo in
+            let availableWidth = max(100, geo.size.width - chassisPadding * 2)
+            let availableHeight = max(200, geo.size.height - chassisPadding * 2)
+            let screenWidth = availableWidth
+            let screenHeight = availableHeight
+
+            ZStack {
+                // Dark titanium smartphone chassis outer frame
+                RoundedRectangle(cornerRadius: outerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(white: 0.18),
+                                Color(white: 0.12),
+                                Color(white: 0.08)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                )
-                .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
-
-            // Inner Smartphone Screen
-            ZStack(alignment: .top) {
-                // Display background
-                Color.black
-
-                // Video stream or inactive placeholder
-                if let image = state.lastScreenFrame {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: screenWidth, height: screenHeight)
-                        .clipped()
-                } else {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .scaleEffect(1.2)
-                        Text(state.isScreenMirroringActive ? "Waiting for video stream..." : "Screen Mirroring Inactive")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white.opacity(0.8))
-                        if !state.isScreenMirroringActive {
-                            Button(action: {
-                                ScreenMirroringService.shared.startMirroring()
-                            }) {
-                                Label("Start Mirroring", systemImage: "play.fill")
-                                    .font(.system(size: 12, weight: .semibold))
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.blue)
-                            .padding(.top, 4)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-
-                // Touch input gesture surface
-                Color.clear
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { val in
-                                let normX = max(0.0, min(1.0, val.location.x / screenWidth))
-                                let normY = max(0.0, min(1.0, val.location.y / screenHeight))
-
-                                if !isDragging {
-                                    isDragging = true
-                                    let startX = max(0.0, min(1.0, val.startLocation.x / screenWidth))
-                                    let startY = max(0.0, min(1.0, val.startLocation.y / screenHeight))
-                                    ScreenMirroringService.shared.sendInputEvent(action: "down", x: startX, y: startY, button: 0)
-                                } else {
-                                    ScreenMirroringService.shared.sendInputEvent(action: "move", x: normX, y: normY, button: 0)
-                                }
-                            }
-                            .onEnded { val in
-                                isDragging = false
-                                let normX = max(0.0, min(1.0, val.location.x / screenWidth))
-                                let normY = max(0.0, min(1.0, val.location.y / screenHeight))
-                                ScreenMirroringService.shared.sendInputEvent(action: "up", x: normX, y: normY, button: 0)
-                            }
                     )
-
-                // Top camera punch hole cutout (Samsung Infinity-O)
-                Circle()
-                    .fill(Color.black)
-                    .frame(width: 11, height: 11)
                     .overlay(
-                        Circle()
-                            .stroke(Color(white: 0.22), lineWidth: 0.75)
+                        RoundedRectangle(cornerRadius: outerRadius, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        Color(white: 0.35),
+                                        Color(white: 0.20),
+                                        Color(white: 0.12)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 1.5
+                            )
                     )
-                    .padding(.top, 7)
-                    .allowsHitTesting(false)
+                    .shadow(color: Color.black.opacity(0.5), radius: 16, x: 0, y: 8)
 
-                // Bottom home indicator bar
-                VStack {
-                    Spacer()
-                    Capsule()
-                        .fill(Color.white.opacity(0.65))
-                        .frame(width: 120, height: 4)
-                        .padding(.bottom, 8)
-                        .contentShape(Rectangle().size(width: 140, height: 24))
+                // Inner Smartphone Screen
+                ZStack(alignment: .top) {
+                    // Display background
+                    Color.black
+
+                    // Video stream or inactive placeholder
+                    if let image = state.lastScreenFrame {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: screenWidth, height: screenHeight)
+                            .clipped()
+                    } else {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .scaleEffect(1.0)
+                            Text(state.isScreenMirroringActive ? "Waiting for video stream..." : "Screen Mirroring Inactive")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.white.opacity(0.8))
+                            if !state.isScreenMirroringActive {
+                                Button(action: {
+                                    ScreenMirroringService.shared.startMirroring()
+                                }) {
+                                    Label("Start Mirroring", systemImage: "play.fill")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.blue)
+                                .padding(.top, 4)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+
+                    // Touch input gesture surface
+                    Color.clear
+                        .contentShape(Rectangle())
                         .gesture(
-                            DragGesture(minimumDistance: 5)
-                                .onEnded { val in
-                                    if val.translation.height < -20 {
-                                        ScreenMirroringService.shared.sendKeyInput(key: "RECENTS", keyCode: 187)
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { val in
+                                    let normX = max(0.0, min(1.0, val.location.x / screenWidth))
+                                    let normY = max(0.0, min(1.0, val.location.y / screenHeight))
+
+                                    if !isDragging {
+                                        isDragging = true
+                                        let startX = max(0.0, min(1.0, val.startLocation.x / screenWidth))
+                                        let startY = max(0.0, min(1.0, val.startLocation.y / screenHeight))
+                                        ScreenMirroringService.shared.sendInputEvent(action: "down", x: startX, y: startY, button: 0)
                                     } else {
-                                        ScreenMirroringService.shared.sendKeyInput(key: "HOME", keyCode: 3)
+                                        ScreenMirroringService.shared.sendInputEvent(action: "move", x: normX, y: normY, button: 0)
                                     }
                                 }
+                                .onEnded { val in
+                                    isDragging = false
+                                    let normX = max(0.0, min(1.0, val.location.x / screenWidth))
+                                    let normY = max(0.0, min(1.0, val.location.y / screenHeight))
+                                    ScreenMirroringService.shared.sendInputEvent(action: "up", x: normX, y: normY, button: 0)
+                                }
                         )
-                        .onTapGesture {
-                            ScreenMirroringService.shared.sendKeyInput(key: "HOME", keyCode: 3)
-                        }
-                }
 
-                // Minimal floating hover toolbar at top
-                VStack {
-                    floatingToolbar
-                        .padding(.top, 14)
-                        .opacity(isHoveringToolbar ? 1.0 : 0.0)
-                        .animation(.easeInOut(duration: 0.2), value: isHoveringToolbar)
-                    Spacer()
+                    // Top camera punch hole cutout (Samsung Infinity-O)
+                    Circle()
+                        .fill(Color.black)
+                        .frame(width: 9, height: 9)
+                        .overlay(
+                            Circle()
+                                .stroke(Color(white: 0.22), lineWidth: 0.75)
+                        )
+                        .padding(.top, 6)
+                        .allowsHitTesting(false)
+
+                    // Bottom home indicator bar
+                    VStack {
+                        Spacer()
+                        Capsule()
+                            .fill(Color.white.opacity(0.65))
+                            .frame(width: 100, height: 4)
+                            .padding(.bottom, 6)
+                            .contentShape(Rectangle().size(width: 120, height: 24))
+                            .gesture(
+                                DragGesture(minimumDistance: 5)
+                                    .onEnded { val in
+                                        if val.translation.height < -20 {
+                                            ScreenMirroringService.shared.sendKeyInput(key: "RECENTS", keyCode: 187)
+                                        } else {
+                                            ScreenMirroringService.shared.sendKeyInput(key: "HOME", keyCode: 3)
+                                        }
+                                    }
+                            )
+                            .onTapGesture {
+                                ScreenMirroringService.shared.sendKeyInput(key: "HOME", keyCode: 3)
+                            }
+                    }
+
+                    // Minimal floating hover toolbar at top
+                    VStack {
+                        floatingToolbar
+                            .padding(.top, 12)
+                            .opacity(isHoveringToolbar ? 1.0 : 0.0)
+                            .animation(.easeInOut(duration: 0.2), value: isHoveringToolbar)
+                        Spacer()
+                    }
                 }
+                .frame(width: screenWidth, height: screenHeight)
+                .clipShape(RoundedRectangle(cornerRadius: innerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: innerRadius, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                )
             }
-            .frame(width: screenWidth, height: screenHeight)
-            .clipShape(RoundedRectangle(cornerRadius: innerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: innerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
-            )
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(width: screenWidth + chassisPadding * 2, height: screenHeight + chassisPadding * 2)
         .onHover { hovering in
             isHoveringToolbar = hovering
         }
@@ -269,7 +274,9 @@ public final class ScreenMirroringWindowController: NSWindowController {
     private var accumulatedDy: Double = 0
 
     private init() {
-        let contentRect = NSRect(x: 0, y: 0, width: 320, height: 687)
+        // Compact default window size (260 x 578) with aspect ratio 9:20 (0.45)
+        // Perfectly clears the macOS Dock on 800-900pt screens while remaining freely resizable
+        let contentRect = NSRect(x: 0, y: 0, width: 260, height: 578)
         let window = NSWindow(
             contentRect: contentRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -285,8 +292,9 @@ public final class ScreenMirroringWindowController: NSWindowController {
         window.isMovableByWindowBackground = true
         window.center()
         window.isReleasedWhenClosed = false
-        window.contentAspectRatio = NSSize(width: 384, height: 824)
-        window.minSize = NSSize(width: 288, height: 618)
+        window.contentAspectRatio = NSSize(width: 9, height: 20)
+        window.minSize = NSSize(width: 180, height: 400)
+        window.maxSize = NSSize(width: 450, height: 1000)
 
         // Suppress standard titlebar traffic lights for frameless smartphone design
         window.standardWindowButton(.closeButton)?.isHidden = true

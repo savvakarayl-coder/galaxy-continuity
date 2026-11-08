@@ -1,0 +1,122 @@
+diff --git a/mac/Sources/GalaxyContinuityKit/Services/ScreenMirroringService.swift b/mac/Sources/GalaxyContinuityKit/Services/ScreenMirroringService.swift
+index b3a2c48..558d142 100644
+--- a/mac/Sources/GalaxyContinuityKit/Services/ScreenMirroringService.swift
++++ b/mac/Sources/GalaxyContinuityKit/Services/ScreenMirroringService.swift
+@@ -76,6 +76,10 @@ public final class ScreenMirroringService: @unchecked Sendable {
+ 
+     private func dispatchAdbInput(args: [String]) {
+         guard let adb = adbPath else { return }
++        if Thread.isMainThread {
++            let isConnected = MainActor.assumeIsolated { DeviceState.shared.isConnected }
++            if isConnected { return }
++        }
+         DispatchQueue.global(qos: .userInteractive).async {
+             let proc = Process()
+             proc.executableURL = URL(fileURLWithPath: adb)
+@@ -119,21 +123,78 @@ public final class ScreenMirroringService: @unchecked Sendable {
+         }
+     }
+ 
++    public func sendTextInput(text: String) {
++        let msg = ContinuityMessage(type: "input_text", text: text)
++        ServerManager.shared.broadcastMessage(msg)
++
++        // Only dispatch ADB input fallback if text is safe ASCII alphanumeric without shell metacharacters
++        guard text.allSatisfy({ $0.isASCII && $0 != "'" && $0 != "\"" && $0 != "`" && $0 != "\\" && $0 != "$" && $0 != "&" && $0 != ";" && $0 != "|" && $0 != "(" && $0 != ")" && $0 != "<" && $0 != ">" }) else {
++            return
++        }
++
++        let escaped = text.replacingOccurrences(of: " ", with: "%s")
++        if !escaped.isEmpty {
++            dispatchAdbInput(args: ["text", escaped])
++        }
++    }
++
++    public func sendScrollEvent(x: Double, y: Double, dx: Double, dy: Double) {
++        let clampedX = max(0.0, min(1.0, x))
++        let clampedY = max(0.0, min(1.0, y))
++        let msg = ContinuityMessage(
++            type: "input_scroll",
++            action: "scroll",
++            x: clampedX,
++            y: clampedY,
++            dx: dx,
++            dy: dy
++        )
++        ServerManager.shared.broadcastMessage(msg)
++
++        // ADB fast-path touch swipe fallback
++        let startPx = Int(clampedX * 1080.0)
++        let startPy = Int(clampedY * 2400.0)
++        let endPx = max(0, min(1080, startPx - Int(dx * 4.0)))
++        let endPy = max(0, min(2400, startPy - Int(dy * 4.0)))
++        if abs(dx) > 1 || abs(dy) > 1 {
++            dispatchAdbInput(args: ["swipe", "\(startPx)", "\(startPy)", "\(endPx)", "\(endPy)", "100"])
++        }
++    }
++
++    public func sendScrollInput(x: Double, y: Double, dx: Double, dy: Double) {
++        sendScrollEvent(x: x, y: y, dx: dx, dy: dy)
++    }
++
+     public func sendKeyInput(key: String, keyCode: Int? = nil) {
++        var resolvedCode = keyCode
++        let keyUpper = key.uppercased()
++        if resolvedCode == nil {
++            if keyUpper == "BACK" { resolvedCode = 4 }
++            else if keyUpper == "HOME" { resolvedCode = 3 }
++            else if keyUpper == "RECENTS" { resolvedCode = 187 }
++            else if keyUpper == "NOTIFICATIONS" { resolvedCode = 83 }
++            else if keyUpper == "POWER" || keyUpper == "LOCK" { resolvedCode = 26 }
++            else if keyUpper == "BACKSPACE" || keyUpper == "DEL" { resolvedCode = 67 }
++            else if keyUpper == "ENTER" || keyUpper == "RETURN" { resolvedCode = 66 }
++            else if keyUpper == "TAB" { resolvedCode = 61 }
++            else if keyUpper == "ESCAPE" || keyUpper == "ESC" { resolvedCode = 111 }
++            else if keyUpper == "SPACE" { resolvedCode = 62 }
++            else if keyUpper == "DPAD_UP" || keyUpper == "UP" { resolvedCode = 19 }
++            else if keyUpper == "DPAD_DOWN" || keyUpper == "DOWN" { resolvedCode = 20 }
++            else if keyUpper == "DPAD_LEFT" || keyUpper == "LEFT" { resolvedCode = 21 }
++            else if keyUpper == "DPAD_RIGHT" || keyUpper == "RIGHT" { resolvedCode = 22 }
++        }
++
+         let msg = ContinuityMessage(
+             type: "input_key",
+             key: key,
+-            keyCode: keyCode
++            keyCode: resolvedCode
+         )
+         ServerManager.shared.broadcastMessage(msg)
+ 
+-        let keyUpper = key.uppercased()
+-        if keyUpper == "BACK" { dispatchAdbInput(args: ["keyevent", "4"]) }
+-        else if keyUpper == "HOME" { dispatchAdbInput(args: ["keyevent", "3"]) }
+-        else if keyUpper == "RECENTS" { dispatchAdbInput(args: ["keyevent", "187"]) }
+-        else if keyUpper == "NOTIFICATIONS" { dispatchAdbInput(args: ["keyevent", "83"]) }
+-        else if keyUpper == "POWER" || keyUpper == "LOCK" { dispatchAdbInput(args: ["keyevent", "26"]) }
+-        else if let code = keyCode, code > 0 { dispatchAdbInput(args: ["keyevent", "\(code)"]) }
++        if let code = resolvedCode, code > 0 {
++            dispatchAdbInput(args: ["keyevent", "\(code)"])
++        }
+     }
+ 
+     public func handleIncomingFrame(_ frameData: Data) {
+@@ -191,6 +252,8 @@ public final class ScreenMirroringService: @unchecked Sendable {
+         print("[ScreenMirroringService] Inbound input key: key=\(message.key ?? "") keyCode=\(message.keyCode ?? 0)")
+     }
+ 
++    public var stallTimeout: TimeInterval = 5.0
++
+     private func startStallWatchdog() {
+         stopStallWatchdog()
+         lastFrameReceivedDate = Date()
+@@ -198,8 +261,8 @@ public final class ScreenMirroringService: @unchecked Sendable {
+         timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+         timer.setEventHandler { [weak self] in
+             guard let self = self, let last = self.lastFrameReceivedDate else { return }
+-            if Date().timeIntervalSince(last) > 30.0 {
+-                print("[ScreenMirroringService] Stream stalled (>30s), issuing screen_stop")
++            if Date().timeIntervalSince(last) >= self.stallTimeout {
++                print("[ScreenMirroringService] Stream stalled (>\(Int(self.stallTimeout))s), issuing screen_stop")
+                 self.stopMirroring(reason: "stream_stalled")
+             }
+         }

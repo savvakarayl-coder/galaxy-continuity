@@ -1,0 +1,13 @@
+--- mac/Sources/GalaxyContinuityKit/Services/ScreenMirroringService.swift	2026-11-08 15:35:29
++++ .agents/teamwork/m1_it3_it2_explorer_1/proposed_ScreenMirroringService.swift	2026-11-08 15:36:17
+@@ -76,10 +76,6 @@
+ 
+     private func dispatchAdbInput(args: [String]) {
+         guard let adb = adbPath else { return }
+-        if Thread.isMainThread {
+-            let isConnected = MainActor.assumeIsolated { DeviceState.shared.isConnected }
+-            if isConnected { return }
+-        }
+         DispatchQueue.global(qos: .userInteractive).async {
+             let proc = Process()
+             proc.executableURL = URL(fileURLWithPath: adb)

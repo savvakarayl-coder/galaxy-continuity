@@ -556,6 +556,191 @@ class TestAdversarialCameraGate(unittest.TestCase):
             listener.close()
             feed_client.close()
 
+    def test_09_non_get_http_methods(self):
+        """Verify non-GET HTTP methods on camera streaming endpoints return 404 and do not crash server."""
+        for method in ["POST", "PUT", "DELETE", "PATCH"]:
+            conn = http.client.HTTPConnection(HOST, PORT)
+            try:
+                conn.request(method, "/api/camera/stream")
+                resp = conn.getresponse()
+                self.assertEqual(resp.status, 404, f"Expected 404 for {method} /api/camera/stream, got {resp.status}")
+            finally:
+                conn.close()
+
+    def test_10_concurrent_snapshot_and_mjpeg_stream_coexistence(self):
+        """Verify MJPEG streaming and concurrent snapshot fetches coexist without stream corruption."""
+        ws = self._create_ws_client()
+        stream_sock = None
+        stop_feeder = threading.Event()
+        try:
+            ws.send_json({"type": "camera_start", "lens": "back", "quality": "1080p", "fps": 30})
+            time.sleep(0.05)
+
+            # Background feeder continuously sending frames
+            def _feeder():
+                while not stop_feeder.is_set():
+                    frame = make_mock_jpeg(320, 240)
+                    pkt = bytes([0x02]) + struct.pack(">I", len(frame)) + frame
+                    try:
+                        ws.send_frame(opcode=0x2, payload=pkt, masked=True)
+                    except Exception:
+                        break
+                    time.sleep(0.02)
+
+            feeder_thread = threading.Thread(target=_feeder, daemon=True)
+            feeder_thread.start()
+            time.sleep(0.05)
+
+            # Connect active MJPEG streaming client
+            stream_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            stream_sock.settimeout(3.0)
+            stream_sock.connect((HOST, PORT))
+            stream_req = (
+                "GET /api/camera/stream HTTP/1.1\r\n"
+                f"Host: {HOST}:{PORT}\r\n"
+                "Accept: multipart/x-mixed-replace\r\n\r\n"
+            )
+            stream_sock.sendall(stream_req.encode("utf-8"))
+
+            # Simultaneously run 10 snapshot fetches
+            for _ in range(10):
+                req = urllib.request.Request(f"http://{HOST}:{PORT}/api/camera/stream")
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
+                    self.assertEqual(resp.status, 200)
+                    self.assertEqual(resp.headers.get("Content-Type"), "image/jpeg")
+                    data = resp.read()
+                    self.assertTrue(data.startswith(b"\xFF\xD8"))
+                    self.assertTrue(data.endswith(b"\xFF\xD9"))
+
+            # Read from stream socket and verify stream is still alive and delivering frames
+            stream_buf = bytearray()
+            for _ in range(5):
+                c = stream_sock.recv(4096)
+                if not c:
+                    break
+                stream_buf.extend(c)
+            self.assertIn(b"--frame", stream_buf)
+
+            stop_feeder.set()
+            feeder_thread.join(timeout=1.0)
+        finally:
+            stop_feeder.set()
+            if stream_sock:
+                stream_sock.close()
+            ws.send_json({"type": "camera_stop"})
+            ws.close()
+
+    def test_11_rapid_50_consecutive_snapshots(self):
+        """Verify 50 consecutive snapshot GET requests complete reliably without connection leaks."""
+        ws = self._create_ws_client()
+        try:
+            ws.send_json({"type": "camera_start", "lens": "front", "quality": "1080p", "fps": 30})
+            time.sleep(0.05)
+            frame = make_mock_jpeg(240, 180)
+            self._feed_camera_frame(ws, frame)
+            time.sleep(0.05)
+
+            for i in range(50):
+                req = urllib.request.Request(f"http://{HOST}:{PORT}/api/camera/stream")
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
+                    self.assertEqual(resp.status, 200)
+                    data = resp.read()
+                    self.assertEqual(len(data), len(frame))
+        finally:
+            ws.send_json({"type": "camera_stop"})
+            ws.close()
+
+    def test_12_slow_mjpeg_client_backpressure_and_sudden_abort(self):
+        """Verify slow reading client does not freeze server and sudden socket abort does not cause SIGPIPE."""
+        ws = self._create_ws_client()
+        slow_sock = None
+        try:
+            ws.send_json({"type": "camera_start", "lens": "back", "quality": "1080p", "fps": 30})
+            time.sleep(0.05)
+            frame = make_mock_jpeg(160, 120)
+            self._feed_camera_frame(ws, frame)
+            time.sleep(0.05)
+
+            # Slow client connects
+            slow_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            slow_sock.connect((HOST, PORT))
+            slow_sock.sendall(
+                b"GET /api/camera/stream HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nAccept: multipart/x-mixed-replace\r\n\r\n"
+            )
+            # Read first 16 bytes then pause
+            slow_sock.recv(16)
+
+            # Feed 30 frames while client is paused
+            for _ in range(30):
+                f = make_mock_jpeg(160, 120)
+                pkt = bytes([0x02]) + struct.pack(">I", len(f)) + f
+                ws.send_frame(opcode=0x2, payload=pkt, masked=True)
+                time.sleep(0.01)
+
+            # Sudden client abort: set SO_LINGER 0 and close
+            slow_sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            slow_sock.close()
+            slow_sock = None
+
+            # Feed more frames after abort: server should cleanly prune dead client
+            for _ in range(10):
+                f = make_mock_jpeg(160, 120)
+                pkt = bytes([0x02]) + struct.pack(">I", len(f)) + f
+                ws.send_frame(opcode=0x2, payload=pkt, masked=True)
+                time.sleep(0.01)
+
+            # Verify server is completely healthy and responsive
+            ws.send_ping(b"after_abort_alive")
+            op, pong = ws.recv_frame(timeout=2.0)
+            self.assertEqual(op, 0xA)
+            self.assertEqual(pong, b"after_abort_alive")
+        finally:
+            if slow_sock:
+                slow_sock.close()
+            ws.send_json({"type": "camera_stop"})
+            ws.close()
+
+    def test_13_camera_control_extreme_boundary_fuzzing(self):
+        """Fuzz camera controls with extreme values, long strings, Unicode, and rapid toggle bursts."""
+        ws = self._create_ws_client()
+        try:
+            ws.send_json({"type": "camera_start", "lens": "back", "quality": "1080p", "fps": 30})
+            time.sleep(0.02)
+
+            # Extreme lenses
+            fuzz_lenses = [
+                "A" * 2048,
+                "📷📸🎥",
+                "../../../../traversal_lens",
+                "<script>alert(1)</script>",
+                "\x00\x01\x02\x03",
+                "-1",
+                "99999999999999999999"
+            ]
+            for fl in fuzz_lenses:
+                ws.send_json({"type": "camera_control", "action": "switch_lens", "lens": fl})
+
+            # Extreme zooms
+            fuzz_zooms = [-10000.0, 0.0, 0.000001, 1000000.0, 1e10]
+            for fz in fuzz_zooms:
+                ws.send_json({"type": "camera_control", "action": "set_zoom", "zoom": fz})
+
+            # Rapid 100 torch toggles
+            for _ in range(50):
+                ws.send_json({"type": "camera_control", "action": "toggle_torch", "torch": True})
+                ws.send_json({"type": "camera_control", "action": "toggle_torch", "torch": False})
+
+            time.sleep(0.05)
+            # Liveness check
+            ws.send_ping(b"fuzz_healthy")
+            op, pong = ws.recv_frame(timeout=2.0)
+            self.assertEqual(op, 0xA)
+            self.assertEqual(pong, b"fuzz_healthy")
+        finally:
+            ws.send_json({"type": "camera_stop"})
+            ws.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

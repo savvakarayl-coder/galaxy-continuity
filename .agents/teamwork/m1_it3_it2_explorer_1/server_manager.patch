@@ -1,0 +1,32 @@
+--- mac/Sources/GalaxyContinuityKit/Services/ServerManager.swift	2026-11-08 15:04:27
++++ .agents/teamwork/m1_it3_it2_explorer_1/proposed_ServerManager.swift	2026-11-08 15:36:17
+@@ -45,6 +45,18 @@
+     private var cameraStreamClients: [UUID: ConnectedClient] = [:]
+ 
+     public private(set) var currentPort: Int = 8765
++
++    private static let serverQueueKey = DispatchSpecificKey<Void>()
++
++    public var hasActiveClients: Bool {
++        if DispatchQueue.getSpecific(key: Self.serverQueueKey) != nil {
++            return clients.values.contains { $0.isWebSocket }
++        } else {
++            return serverQueue.sync {
++                clients.values.contains { $0.isWebSocket }
++            }
++        }
++    }
+ 
+     public var downloadsDirectory: URL {
+         let fm = FileManager.default
+@@ -60,7 +72,9 @@
+         return dir
+     }
+ 
+-    private init() {}
++    private init() {
++        serverQueue.setSpecific(key: Self.serverQueueKey, value: ())
++    }
+ 
+     public func start(port: Int = 8765) {
+         stop()

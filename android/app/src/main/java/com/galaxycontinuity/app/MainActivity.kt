@@ -7,6 +7,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +35,7 @@ class MainActivity : ComponentActivity() {
     private val projectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        Log.i("MainActivity", "projectionLauncher callback received resultCode=${result.resultCode}, data=${result.data}")
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             val serviceIntent = Intent(this, ScreenMirroringService::class.java).apply {
                 action = ScreenMirroringService.ACTION_START
@@ -54,8 +56,15 @@ class MainActivity : ComponentActivity() {
 
     // Function to launch screen capture consent dialog
     fun requestScreenCapture() {
+        Log.i("MainActivity", "requestScreenCapture() called")
         val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
-        mpManager?.createScreenCaptureIntent()?.let { projectionLauncher.launch(it) }
+        if (mpManager == null) {
+            Log.e("MainActivity", "MediaProjectionManager is null!")
+            return
+        }
+        val captureIntent = mpManager.createScreenCaptureIntent()
+        Log.i("MainActivity", "Launching createScreenCaptureIntent: $captureIntent")
+        projectionLauncher.launch(captureIntent)
     }
 
     // Function to open Android Accessibility settings
@@ -68,6 +77,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        handleIntent(intent)
 
         // Start service
         val serviceIntent = Intent(this, ContinuityService::class.java)
@@ -95,6 +106,17 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == "com.galaxycontinuity.app.REQUEST_SCREEN_CAPTURE") {
+            requestScreenCapture()
         }
     }
 }

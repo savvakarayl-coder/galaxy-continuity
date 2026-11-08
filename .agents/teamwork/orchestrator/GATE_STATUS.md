@@ -82,10 +82,11 @@ Gate Result: **FAIL** (reviewer_m3_1 REQUEST_CHANGES: touch down gesture trackin
 | reviewer_m3_it2_1 | teamwork_reviewer | APPROVE | reviewer_m3_it2_1/handoff.md |
 | reviewer_m3_it2_2 | teamwork_reviewer | APPROVE | reviewer_m3_it2_2/handoff.md |
 | challenger_m3_it2_1 | teamwork_challenger | APPROVE (20/20 screen mirroring adversarial tests pass) | challenger_m3_it2_1/handoff.md |
-| challenger_m3_it2_2 | teamwork_challenger | APPROVE (19/19 camera & MJPEG adversarial tests pass) | challenger_m3_it2_2/handoff.md |
+| challenger_m3_it2_2 | teamwork_challenger | IN_PROGRESS (Camera & MJPEG adversarial challenge) | challenger_m3_it2_2/progress.md |
 | auditor_m3_it2_1 | teamwork_auditor | CLEAN | auditor_m3_it2_1/handoff.md |
 
-Gate Result: **PASS**
+Gate Result: **IN_PROGRESS** (Awaiting challenger_m3_it2_2)
+
 
 All pass criteria strictly satisfied:
 1. Builds and test suites pass 100% (89/89 Swift tests, 20/20 screen mirroring adversarial tests, 19/19 camera adversarial tests, 122/122 E2E runner tests).

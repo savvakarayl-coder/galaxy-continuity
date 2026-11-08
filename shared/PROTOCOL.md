@@ -439,17 +439,21 @@ Sent by macOS Host viewer window to Galaxy Client to inject touch gestures.
   "action": "down",
   "x": 0.5234,
   "y": 0.7412,
-  "button": 0
+  "button": 0,
+  "dx": 0.0,
+  "dy": 0.0
 }
 ```
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | String | Yes | Fixed value: `"input_event"` |
-| `action` | String | Yes | Gesture action: `"down"`, `"move"`, `"up"`, `"scroll"` |
+| `action` | String | Yes | Gesture action: `"down"`, `"move"`, `"up"`, `"scroll"`, `"cancel"` |
 | `x` | Double | Yes | Normalized horizontal coordinate (`0.0` left to `1.0` right) |
 | `y` | Double | Yes | Normalized vertical coordinate (`0.0` top to `1.0` bottom) |
 | `button` | Integer | Optional | Mouse button: `0` (Left/Primary), `1` (Right/Secondary), `2` (Middle) |
+| `dx` | Double | Optional | Horizontal displacement delta (for action `"scroll"`) |
+| `dy` | Double | Optional | Vertical displacement delta (for action `"scroll"`) |
 
 ---
 
@@ -467,8 +471,50 @@ Sent by macOS Host viewer window to Galaxy Client to inject navigation or hardwa
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | String | Yes | Fixed value: `"input_key"` |
-| `key` | String | Yes | Semantic key name: `"BACK"`, `"HOME"`, `"RECENTS"`, `"VOLUME_UP"`, `"VOLUME_DOWN"`, `"ENTER"`, `"POWER"` |
-| `keyCode` | Integer | Optional | Android `KeyEvent` integer code (e.g. BACK = 4, HOME = 3, RECENTS = 187, ENTER = 66) |
+| `key` | String | Yes | Semantic key name: `"BACK"`, `"HOME"`, `"RECENTS"`, `"VOLUME_UP"`, `"VOLUME_DOWN"`, `"ENTER"`, `"RETURN"`, `"BACKSPACE"`, `"DEL"`, `"TAB"`, `"ESCAPE"`, `"ESC"`, `"SPACE"`, `"DPAD_UP"`, `"DPAD_DOWN"`, `"DPAD_LEFT"`, `"DPAD_RIGHT"`, `"POWER"`, `"LOCK"` |
+| `keyCode` | Integer | Optional | Android `KeyEvent` integer code (e.g. BACK = 4, HOME = 3, RECENTS = 187, ENTER = 66, DEL = 67, TAB = 61, ESCAPE = 111, SPACE = 62, DPAD_UP = 19, DPAD_DOWN = 20, DPAD_LEFT = 21, DPAD_RIGHT = 22, POWER = 26) |
+
+---
+
+#### Remote Text Input (`input_text`)
+Sent by macOS Host to Galaxy Client when the user types text on the Mac keyboard while the screen mirroring window is focused.
+
+```json
+{
+  "type": "input_text",
+  "text": "Hello Galaxy! Привет 🚀",
+  "source": "mac"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | String | Yes | Fixed value: `"input_text"` |
+| `text` | String | Yes | Raw UTF-8 text string to be typed / inserted |
+| `source` | String | Optional | Originating sender role (e.g. `"mac"`) |
+
+---
+
+#### Remote Scroll Gesture (`input_scroll`)
+Sent by macOS Host to Galaxy Client when two-finger trackpad gestures or mouse scroll wheel events occur over the mirror window.
+
+```json
+{
+  "type": "input_scroll",
+  "x": 0.5000,
+  "y": 0.5000,
+  "dx": 0.0,
+  "dy": -24.5
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | String | Yes | Fixed value: `"input_scroll"` |
+| `x` | Double | Yes | Normalized horizontal anchor coordinate (`0.0` left to `1.0` right) |
+| `y` | Double | Yes | Normalized vertical anchor coordinate (`0.0` top to `1.0` bottom) |
+| `dx` | Double | Yes | Horizontal scroll displacement in points (positive = right, negative = left) |
+| `dy` | Double | Yes | Vertical scroll displacement in points (positive = down, negative = up) |
 
 ---
 
@@ -582,6 +628,25 @@ Sent by macOS Host to Galaxy Client in response to user input in macOS notificat
 | `id` | String | Yes | ID key matching the original `phone_notification` |
 | `packageName` | String | Yes | Target Android package name |
 | `replyText` | String | Yes | User's response text to inject into `RemoteInput` |
+
+---
+
+#### Notification Activation / Click Navigation (`notification_open`)
+Sent by macOS Host to Galaxy Client when the user clicks or activates a forwarded notification banner on macOS.
+
+```json
+{
+  "type": "notification_open",
+  "id": "notif-uuid-10492",
+  "packageName": "org.telegram.messenger"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | String | Yes | Fixed value: `"notification_open"` |
+| `id` | String | Yes | ID key matching the original `phone_notification` |
+| `packageName` | String | Yes | Target Android package name to launch or foreground |
 
 ---
 

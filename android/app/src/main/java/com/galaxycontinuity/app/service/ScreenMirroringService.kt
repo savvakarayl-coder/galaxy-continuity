@@ -100,8 +100,16 @@ class ScreenMirroringService : Service() {
                 if (resultCode == Activity.RESULT_OK && resultData != null) {
                     startMirroring(resultCode, resultData, width, height, fps, bitrate, format)
                 } else {
-                    Log.w(TAG, "Cannot start screen mirroring: missing MediaProjection user consent")
-                    // Notify macOS immediately so it does not hang waiting for frames until stall watchdog
+                    Log.w(TAG, "Cannot start screen mirroring: missing MediaProjection user consent. Requesting via MainActivity...")
+                    try {
+                        val consentIntent = Intent(this@ScreenMirroringService, com.galaxycontinuity.app.MainActivity::class.java).apply {
+                            action = "com.galaxycontinuity.app.REQUEST_SCREEN_CAPTURE"
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        }
+                        startActivity(consentIntent)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to launch consent activity: ${e.message}")
+                    }
                     ContinuityService.activeClient?.sendScreenStop("media_projection_permission_required")
                     stopSelf()
                 }
@@ -203,10 +211,16 @@ class ScreenMirroringService : Service() {
         // Extraction loop
         streamingJob = serviceScope.launch {
             val bufferInfo = MediaCodec.BufferInfo()
+            var frameCount = 0
+            Log.d(TAG, "Entering MediaCodec extraction loop (isStreaming=$isStreaming)")
             while (isActive && isStreaming) {
                 try {
                     val outputIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
                     if (outputIndex >= 0) {
+                        frameCount++
+                        if (frameCount <= 5 || frameCount % 30 == 0) {
+                            Log.d(TAG, "MediaCodec frame #$frameCount produced, size=${bufferInfo.size}, flags=${bufferInfo.flags}")
+                        }
                         val outputBuffer = codec.getOutputBuffer(outputIndex)
                         if (outputBuffer != null && bufferInfo.size > 0) {
                             outputBuffer.position(bufferInfo.offset)
@@ -243,6 +257,7 @@ class ScreenMirroringService : Service() {
                     }
                 }
             }
+            Log.d(TAG, "Exiting MediaCodec extraction loop (isStreaming=$isStreaming, isActive=$isActive)")
         }
     }
 
