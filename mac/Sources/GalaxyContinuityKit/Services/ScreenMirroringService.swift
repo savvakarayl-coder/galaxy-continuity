@@ -139,24 +139,30 @@ public final class ScreenMirroringService: @unchecked Sendable {
     }
 
     public func sendScrollEvent(x: Double, y: Double, dx: Double, dy: Double) {
+        let clampedX = max(0.0, min(1.0, x))
+        let clampedY = max(0.0, min(1.0, y))
         let msg = ContinuityMessage(
             type: "input_scroll",
             action: "scroll",
-            x: x,
-            y: y,
+            x: clampedX,
+            y: clampedY,
             dx: dx,
             dy: dy
         )
         ServerManager.shared.broadcastMessage(msg)
 
-        let startX = Int(x * 1080.0)
-        let startY = Int(y * 2400.0)
+        let startX = Int(clampedX * 1080.0)
+        let startY = Int(clampedY * 2400.0)
         // Highly responsive, natural swipe physics for Trackpad 2-finger scroll
         // dx > 0 (trackpad fingers move left) -> content scrolls right / page swipes left
         let endX = max(30, min(1050, startX - Int(dx * 12.0)))
         let endY = max(30, min(2370, startY + Int(dy * 12.0)))
         let duration = max(30, min(120, Int(hypot(Double(endX - startX), Double(endY - startY)) / 4.0)))
         dispatchAdbInput(args: ["swipe", "\(startX)", "\(startY)", "\(endX)", "\(endY)", "\(duration)"])
+    }
+
+    public func sendScrollInput(x: Double, y: Double, dx: Double, dy: Double) {
+        sendScrollEvent(x: x, y: y, dx: dx, dy: dy)
     }
 
     public func sendKeyInput(key: String, keyCode: Int? = nil) {

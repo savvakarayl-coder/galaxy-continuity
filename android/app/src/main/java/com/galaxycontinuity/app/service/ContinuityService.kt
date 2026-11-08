@@ -34,6 +34,7 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
 
         var isRunning = false
         var activeClient: WebSocketClient? = null
+        var activeClipboardSync: ClipboardSync? = null
         var lastStatus = "Disconnected"
         val isSocketConnected = MutableStateFlow(false)
         val connectionStatus = MutableStateFlow("Disconnected. Searching...")
@@ -144,6 +145,7 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         clipboardSync = ClipboardSync(this) { content, contentType, hash ->
             webSocketClient?.sendClipboard(content, contentType, hash)
         }
+        activeClipboardSync = clipboardSync
         clipboardSync?.start()
 
         nsdDiscovery = NsdDiscovery(this) { host, port, name ->
@@ -186,6 +188,7 @@ class ContinuityService : Service(), WebSocketClient.ContinuityListener {
         super.onDestroy()
         isRunning = false
         activeClient = null
+        activeClipboardSync = null
         isSocketConnected.value = false
         connectionStatus.value = "Disconnected"
         reconnectionJob?.cancel()

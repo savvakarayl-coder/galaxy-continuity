@@ -43,7 +43,16 @@ class ContinuityAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Event monitoring not required for input injection
+        // Trigger clipboard synchronization on relevant user interaction events
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_VIEW_CLICKED,
+            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+                ContinuityService.activeClipboardSync?.checkAndSyncClipboard()
+            }
+        }
     }
 
     override fun onInterrupt() {

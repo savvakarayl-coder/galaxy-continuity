@@ -81,6 +81,18 @@ class ClipboardSync(
         }
     }
 
+    /**
+     * Actively checks primary clip and synchronizes if a new clip is present.
+     * Called by AccessibilityService on user UI interactions (copy, selection, window focus change).
+     */
+    fun checkAndSyncClipboard() {
+        try {
+            clipListener.onPrimaryClipChanged()
+        } catch (e: Exception) {
+            safeLogE(tag, "Error in manual checkAndSyncClipboard: ${e.message}")
+        }
+    }
+
     fun start() {
         clipboardManager.addPrimaryClipChangedListener(clipListener)
     }

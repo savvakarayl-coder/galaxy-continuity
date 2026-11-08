@@ -21,7 +21,8 @@ public final class ClipboardSyncService {
         stopMonitoring()
         self.lastChangeCount = NSPasteboard.general.changeCount
 
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        // 250ms polling for ultra-responsive Universal Clipboard
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.checkPasteboard()
             }
