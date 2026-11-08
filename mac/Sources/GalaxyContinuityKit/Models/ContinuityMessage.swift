@@ -52,6 +52,8 @@ public struct ContinuityMessage: Codable, Equatable {
     public var action: String?
     public var x: Double?
     public var y: Double?
+    public var dx: Double?
+    public var dy: Double?
     public var button: Int?
     public var key: String?
     public var keyCode: Int?
@@ -110,6 +112,8 @@ public struct ContinuityMessage: Codable, Equatable {
         action: String? = nil,
         x: Double? = nil,
         y: Double? = nil,
+        dx: Double? = nil,
+        dy: Double? = nil,
         button: Int? = nil,
         key: String? = nil,
         keyCode: Int? = nil,
@@ -159,6 +163,8 @@ public struct ContinuityMessage: Codable, Equatable {
         self.action = action
         self.x = x
         self.y = y
+        self.dx = dx
+        self.dy = dy
         self.button = button
         self.key = key
         self.keyCode = keyCode

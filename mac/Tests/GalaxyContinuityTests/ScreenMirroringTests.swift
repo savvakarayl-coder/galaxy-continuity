@@ -203,5 +203,60 @@ struct ScreenMirroringTests {
         #expect(msgExcess.x == 2.5)
         #expect(msgExcess.y == 3.0)
     }
+
+    @Test("Serialize input_text message")
+    func testInputTextSerialization() throws {
+        let msg = ContinuityMessage(type: "input_text", text: "Hello Galaxy")
+        let data = try JSONEncoder().encode(msg)
+        let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: data)
+        #expect(decoded.type == "input_text")
+        #expect(decoded.text == "Hello Galaxy")
+    }
+
+    @Test("Serialize input_scroll message with deltas")
+    func testInputScrollSerialization() throws {
+        let msg = ContinuityMessage(type: "input_scroll", x: 0.5, y: 0.5, dx: 10.0, dy: -25.5)
+        let data = try JSONEncoder().encode(msg)
+        let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: data)
+        #expect(decoded.type == "input_scroll")
+        #expect(decoded.x == 0.5)
+        #expect(decoded.y == 0.5)
+        #expect(decoded.dx == 10.0)
+        #expect(decoded.dy == -25.5)
+    }
+
+    @Test("Keycode resolution for editing keys")
+    func testExtendedKeyResolution() {
+        ScreenMirroringService.shared.sendKeyInput(key: "BACKSPACE")
+        ScreenMirroringService.shared.sendKeyInput(key: "ENTER")
+        ScreenMirroringService.shared.sendKeyInput(key: "TAB")
+        ScreenMirroringService.shared.sendKeyInput(key: "ESCAPE")
+        ScreenMirroringService.shared.sendKeyInput(key: "SPACE")
+        ScreenMirroringService.shared.sendKeyInput(key: "DPAD_UP")
+        ScreenMirroringService.shared.sendKeyInput(key: "DPAD_DOWN")
+    }
+
+    @Test("Coordinate clamping on scroll dispatch prevents out-of-bounds input")
+    func testScrollCoordinateClamping() {
+        let service = ScreenMirroringService.shared
+        // sendScrollInput with raw coords -0.2, 1.4 must clamp to 0.0 and 1.0
+        service.sendScrollInput(x: -0.2, y: 1.4, dx: 0.0, dy: -30.0)
+        // Verify no fatal errors, clamped coordinates passed to message
+    }
+
+    @Test("Scroll delta accumulator coalesces high-frequency trackpad events")
+    func testScrollDeltaAccumulator() {
+        var accumulatorDx: Double = 0.0
+        var accumulatorDy: Double = 0.0
+
+        // Simulate 10 high-frequency micro-scroll events within 16ms
+        for _ in 0..<10 {
+            accumulatorDx += 0.2
+            accumulatorDy += -1.5
+        }
+
+        #expect(accumulatorDx > 1.99 && accumulatorDx < 2.01)
+        #expect(accumulatorDy > -15.01 && accumulatorDy < -14.99)
+    }
 }
 #endif

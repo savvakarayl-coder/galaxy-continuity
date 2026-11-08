@@ -11,6 +11,19 @@ public final class NotificationService: NSObject, UNUserNotificationCenterDelega
     /// Test / Headless interception callback
     public var onReplyDispatched: ((_ id: String, _ packageName: String, _ text: String) -> Void)?
 
+    /// Callback when user clicks on a notification banner (default action)
+    public var onNotificationClicked: ((_ id: String, _ packageName: String) -> Void)?
+
+    /// Test helper alias for notification open callback
+    public var onNotificationOpened: ((_ id: String, _ packageName: String) -> Void)? {
+        get { onNotificationClicked }
+        set { onNotificationClicked = newValue }
+    }
+
+    public func dispatchNotificationOpen(id: String, packageName: String) {
+        onNotificationClicked?(id, packageName)
+    }
+
     /// Indicates whether UNUserNotificationCenter is available in the current execution context.
     /// Standalone command-line executables and unit test runners lack an application bundle identifier
     /// (`Bundle.main.bundleIdentifier == nil`), causing `UNUserNotificationCenter.current()` to throw
@@ -169,14 +182,21 @@ public final class NotificationService: NSObject, UNUserNotificationCenterDelega
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        let userInfo = response.notification.request.content.userInfo
+        let notifId = userInfo["notifId"] as? String ?? ""
+        let packageName = userInfo["packageName"] as? String ?? ""
+
         if response.actionIdentifier == NotificationService.ACTION_REPLY,
            let textResponse = response as? UNTextInputNotificationResponse {
             let replyText = textResponse.userText
-            let userInfo = response.notification.request.content.userInfo
-            let notifId = userInfo["notifId"] as? String ?? ""
-            let packageName = userInfo["packageName"] as? String ?? ""
             if !notifId.isEmpty && !replyText.isEmpty {
                 dispatchReply(id: notifId, packageName: packageName, text: replyText)
+            }
+        } else if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            if !packageName.isEmpty || !notifId.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onNotificationClicked?(notifId, packageName)
+                }
             }
         }
         completionHandler()

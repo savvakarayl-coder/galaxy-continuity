@@ -119,6 +119,43 @@ public final class ScreenMirroringService: @unchecked Sendable {
         }
     }
 
+    public func sendTextInput(text: String) {
+        guard !text.isEmpty else { return }
+        let msg = ContinuityMessage(
+            type: "input_text",
+            text: text
+        )
+        ServerManager.shared.broadcastMessage(msg)
+
+        let escaped = text
+            .replacingOccurrences(of: " ", with: "%s")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "&", with: "\\&")
+            .replacingOccurrences(of: "(", with: "\\(")
+            .replacingOccurrences(of: ")", with: "\\)")
+            .replacingOccurrences(of: ";", with: "\\;")
+        dispatchAdbInput(args: ["text", escaped])
+    }
+
+    public func sendScrollEvent(x: Double, y: Double, dx: Double, dy: Double) {
+        let msg = ContinuityMessage(
+            type: "input_scroll",
+            action: "scroll",
+            x: x,
+            y: y,
+            dx: dx,
+            dy: dy
+        )
+        ServerManager.shared.broadcastMessage(msg)
+
+        let startX = Int(x * 1080.0)
+        let startY = Int(y * 2400.0)
+        let endX = max(50, min(1030, startX - Int(dx * 8.0)))
+        let endY = max(50, min(2350, startY + Int(dy * 8.0)))
+        dispatchAdbInput(args: ["swipe", "\(startX)", "\(startY)", "\(endX)", "\(endY)", "80"])
+    }
+
     public func sendKeyInput(key: String, keyCode: Int? = nil) {
         let msg = ContinuityMessage(
             type: "input_key",

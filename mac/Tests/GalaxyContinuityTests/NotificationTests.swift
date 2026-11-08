@@ -115,4 +115,43 @@ struct NotificationTests {
         #expect(decoded.text == nil)
         #expect(decoded.canReply == nil)
     }
+
+    @Test("Serialize notification_open message")
+    func testNotificationOpenSerialization() throws {
+        let msg = ContinuityMessage(type: "notification_open", id: "notif-101", packageName: "org.telegram.messenger")
+        let data = try JSONEncoder().encode(msg)
+        let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: data)
+        #expect(decoded.type == "notification_open")
+        #expect(decoded.id == "notif-101")
+        #expect(decoded.packageName == "org.telegram.messenger")
+    }
+
+    @Test("onNotificationClicked callback dispatches properly")
+    func testNotificationClickCallback() {
+        var clickedId = ""
+        var clickedPkg = ""
+        NotificationService.shared.onNotificationClicked = { id, pkg in
+            clickedId = id
+            clickedPkg = pkg
+        }
+        NotificationService.shared.onNotificationClicked?("test-id-99", "com.google.android.youtube")
+        #expect(clickedId == "test-id-99")
+        #expect(clickedPkg == "com.google.android.youtube")
+    }
+
+    @Test("Notification default click triggers notification_open dispatch")
+    func testNotificationDefaultClickDispatch() {
+        var openedId = ""
+        var openedPkg = ""
+
+        NotificationService.shared.onNotificationOpened = { id, pkg in
+            openedId = id
+            openedPkg = pkg
+        }
+
+        NotificationService.shared.dispatchNotificationOpen(id: "test-notif-1", packageName: "com.whatsapp")
+
+        #expect(openedId == "test-notif-1")
+        #expect(openedPkg == "com.whatsapp")
+    }
 }

@@ -803,6 +803,15 @@ public final class ServerManager {
         self.broadcastMessage(msg)
     }
 
+    public func sendNotificationOpen(id: String, packageName: String) {
+        let msg = ContinuityMessage(
+            type: "notification_open",
+            id: id,
+            packageName: packageName
+        )
+        self.broadcastMessage(msg)
+    }
+
     // MARK: - IP helper
     public func detectLocalIP() -> String? {
         var address: String?

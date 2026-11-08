@@ -104,5 +104,70 @@ struct ContinuityMessageTests {
         let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: encoded)
         #expect(decoded == original)
     }
+
+    @Test("Roundtrip serialization of input_text message")
+    func testInputTextSerialization() throws {
+        let msg = ContinuityMessage(type: "input_text", text: "Привет мир! 🚀")
+        let data = try JSONEncoder().encode(msg)
+        let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: data)
+        #expect(decoded.type == "input_text")
+        #expect(decoded.text == "Привет мир! 🚀")
+    }
+
+    @Test("Roundtrip serialization of input_scroll with float and integer deltas")
+    func testInputScrollSerialization() throws {
+        let msg = ContinuityMessage(type: "input_scroll", x: 0.5, y: 0.5, dx: 12.5, dy: -45.0)
+        let data = try JSONEncoder().encode(msg)
+        let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: data)
+        #expect(decoded.type == "input_scroll")
+        #expect(decoded.x == 0.5)
+        #expect(decoded.y == 0.5)
+        #expect(decoded.dx == 12.5)
+        #expect(decoded.dy == -45.0)
+    }
+
+    @Test("Decode input_scroll from raw JSON with integer and decimal values")
+    func testInputScrollRawJsonDecoding() throws {
+        let json = """
+        {"type":"input_scroll","x":0.25,"y":0.75,"dx":0,"dy":-15}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: json)
+        #expect(decoded.type == "input_scroll")
+        #expect(decoded.dx == 0.0)
+        #expect(decoded.dy == -15.0)
+    }
+
+    @Test("Roundtrip serialization of notification_open message")
+    func testNotificationOpenSerialization() throws {
+        let msg = ContinuityMessage(
+            type: "notification_open",
+            id: "notif-uuid-88991",
+            packageName: "org.telegram.messenger"
+        )
+        let data = try JSONEncoder().encode(msg)
+        let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: data)
+        #expect(decoded.type == "notification_open")
+        #expect(decoded.id == "notif-uuid-88991")
+        #expect(decoded.packageName == "org.telegram.messenger")
+    }
+
+    @Test("Serialization of editing keys in input_key (DEL, ENTER, TAB, ESCAPE)")
+    func testEditingKeysSerialization() throws {
+        let keys = [
+            ("DEL", 67),
+            ("ENTER", 66),
+            ("TAB", 61),
+            ("ESCAPE", 111),
+            ("SPACE", 62)
+        ]
+        for (name, code) in keys {
+            let msg = ContinuityMessage(type: "input_key", key: name, keyCode: code)
+            let data = try JSONEncoder().encode(msg)
+            let decoded = try JSONDecoder().decode(ContinuityMessage.self, from: data)
+            #expect(decoded.type == "input_key")
+            #expect(decoded.key == name)
+            #expect(decoded.keyCode == code)
+        }
+    }
 }
 #endif
